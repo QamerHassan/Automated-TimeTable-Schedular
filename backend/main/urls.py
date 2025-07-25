@@ -39,5 +39,3 @@ urlpatterns = [
     path('api/auth/profile/update/', auth_views.update_user_profile, name='update_user_profile'),
     path('api/auth/change-password/', auth_views.change_password, name='change_password'),
 ]
-
-

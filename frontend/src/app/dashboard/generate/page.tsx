@@ -234,22 +234,22 @@
 "use client"
 
 import type React from "react"
-
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Upload, FileSpreadsheet, Loader2 } from "lucide-react"
+import { Upload, FileSpreadsheet, Loader2, Database } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { apiService, type TimetableData } from "@/lib/api"
 
 export default function GeneratePage() {
-  const [maxSemester, setMaxSemester] = useState<number>(4)
+  const [maxSemester, setMaxSemester] = useState<number>(8) // Changed default to 8
   const [file, setFile] = useState<File | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
   const [generatedTimetable, setGeneratedTimetable] = useState<TimetableData | null>(null)
   const [isSaving, setIsSaving] = useState(false)
+  const [useEnhancedMode, setUseEnhancedMode] = useState(false) // NEW: Enhanced mode state
   const { toast } = useToast()
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -268,13 +268,15 @@ export default function GeneratePage() {
     }
   }
 
+  // UPDATED handleSubmit function with enhanced error handling
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    if (!file) {
+    // MODIFIED VALIDATION: Allow generation without file if using enhanced mode
+    if (!file && !useEnhancedMode) {
       toast({
         title: "No file selected",
-        description: "Please upload an Excel file with course data",
+        description: "Please upload an Excel file or enable enhanced mode",
         variant: "destructive",
       })
       return
@@ -283,13 +285,50 @@ export default function GeneratePage() {
     setIsGenerating(true)
 
     try {
-      const response = await apiService.generateTimetable(maxSemester, file)
-
-      setGeneratedTimetable(response.timetable_data)
-      toast({
-        title: "Success!",
-        description: response.message,
-      })
+      let response;
+      
+      if (useEnhancedMode) {
+        // NEW: Call enhanced API endpoint without file
+        response = await fetch('http://localhost:8000/api/generate-enhanced/', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: new URLSearchParams({
+            max_semester: maxSemester.toString()
+          })
+        });
+        
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+          setGeneratedTimetable(result.schedule)
+          
+          // ENHANCED: Better conflict handling and feedback
+          if (result.conflicts && result.conflicts > 0) {
+            toast({
+              title: "Timetable Generated with Conflicts",
+              description: `Generated timetable has ${result.conflicts} conflicts. Fitness: ${result.fitness}. Conflicts are flagged in red.`,
+              variant: "default", // Changed from "warning" to avoid potential issues
+            })
+          } else {
+            toast({
+              title: "Perfect Timetable Generated!",
+              description: `Conflict-free timetable created. Fitness: ${result.fitness}`,
+            })
+          }
+        } else {
+          throw new Error(result.message || 'Enhanced generation failed')
+        }
+      } else {
+        // Original file upload workflow
+        const apiResponse = await apiService.generateTimetable(maxSemester, file!)
+        setGeneratedTimetable(apiResponse.timetable_data)
+        toast({
+          title: "Success!",
+          description: apiResponse.message,
+        })
+      }
     } catch (error) {
       console.error("Error generating timetable:", error)
       toast({
@@ -316,21 +355,46 @@ export default function GeneratePage() {
     setIsSaving(true)
 
     try {
-      const response = await apiService.saveTimetable(maxSemester, generatedTimetable)
-      console.log("Save response:", response)
+      // For enhanced mode, use the new save API format
+      if (useEnhancedMode) {
+        const response = await fetch('http://localhost:8000/api/save/', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            schedule: generatedTimetable,
+            max_semester: maxSemester
+          })
+        });
 
-      toast({
-        title: "Saved!",
-        description: "Timetable has been saved successfully",
-      })
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+          toast({
+            title: "Saved!",
+            description: "Enhanced timetable has been saved successfully",
+          })
+        } else {
+          throw new Error(result.message || 'Save failed')
+        }
+      } else {
+        // Original save workflow
+        const response = await apiService.saveTimetable(maxSemester, generatedTimetable)
+        console.log("Save response:", response)
+
+        toast({
+          title: "Saved!",
+          description: "Timetable has been saved successfully",
+        })
+      }
 
       // Reset form
       setGeneratedTimetable(null)
       setFile(null)
-      setMaxSemester(4)
+      setMaxSemester(8)
+      setUseEnhancedMode(false)
 
-      // Optional: Redirect to view page
-      // window.location.href = '/dashboard/view'
     } catch (error) {
       console.error("Error saving timetable:", error)
       toast({
@@ -343,17 +407,12 @@ export default function GeneratePage() {
     }
   }
 
-  const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+  // Updated time slots to match your enhanced system
+  const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] // Added Saturday
   const timeSlots = [
-    "08:00 - 09:15",
-    "09:30 - 10:45",
-    "11:00 - 12:15",
-    "12:30 - 13:45",
-    "14:00 - 15:15",
-    "15:30 - 16:45",
+    "08:00-09:15", "09:30-10:45", "11:00-12:15", "12:30-13:45", 
+    "14:00-15:15", "15:30-16:45", "17:00-18:15", "18:30-19:45", "20:00-21:15" // Extended hours
   ]
-  const labSlots = ["08:00 - 10:30", "11:00 - 13:30", "14:00 - 16:30"]
-  const allSlots = [...timeSlots, ...labSlots]
 
   return (
     <div className="container mx-auto p-6 space-y-6">
@@ -363,10 +422,36 @@ export default function GeneratePage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Upload Course Data</CardTitle>
-          <CardDescription>Upload an Excel file containing course information, rooms, and student data</CardDescription>
+          <CardTitle>Timetable Generation Options</CardTitle>
+          <CardDescription>
+            Choose between single-program upload or comprehensive multi-program generation
+          </CardDescription>
         </CardHeader>
         <CardContent>
+          {/* NEW: Enhanced Mode Toggle */}
+          <div className="mb-6 p-4 border rounded-lg bg-blue-50">
+            <div className="flex items-center space-x-3">
+              <input
+                type="checkbox"
+                id="enhancedMode"
+                checked={useEnhancedMode}
+                onChange={(e) => setUseEnhancedMode(e.target.checked)}
+                className="w-4 h-4 text-blue-600"
+              />
+              <div className="flex items-center space-x-2">
+                <Database className="h-5 w-5 text-blue-600" />
+                <Label htmlFor="enhancedMode" className="text-sm font-medium cursor-pointer">
+                  Enhanced Mode - Generate from comprehensive database (All 6 programs, 240+ rooms)
+                </Label>
+              </div>
+            </div>
+            {useEnhancedMode && (
+              <p className="mt-2 text-xs text-blue-600">
+                Using pre-loaded institutional data with Genetic Algorithm optimization
+              </p>
+            )}
+          </div>
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -380,28 +465,40 @@ export default function GeneratePage() {
                   onChange={(e) => setMaxSemester(Number.parseInt(e.target.value))}
                   required
                 />
+                {useEnhancedMode && (
+                  <p className="text-xs text-gray-600">
+                    Recommended: 8 (covers all programs in database)
+                  </p>
+                )}
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="file">Course Data File</Label>
-                <div className="flex items-center space-x-2">
-                  <Input id="file" type="file" accept=".xlsx,.xls" onChange={handleFileChange} required />
-                  <FileSpreadsheet className="h-5 w-5 text-muted-foreground" />
+              {/* Only show file input when not in enhanced mode */}
+              {!useEnhancedMode && (
+                <div className="space-y-2">
+                  <Label htmlFor="file">Course Data File</Label>
+                  <div className="flex items-center space-x-2">
+                    <Input id="file" type="file" accept=".xlsx,.xls" onChange={handleFileChange} required />
+                    <FileSpreadsheet className="h-5 w-5 text-muted-foreground" />
+                  </div>
+                  {file && <p className="text-sm text-muted-foreground">Selected: {file.name}</p>}
                 </div>
-                {file && <p className="text-sm text-muted-foreground">Selected: {file.name}</p>}
-              </div>
+              )}
             </div>
 
             <Button type="submit" disabled={isGenerating} className="w-full">
               {isGenerating ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Generating Perfect Timetable...
+                  {useEnhancedMode ? "Running Genetic Algorithm..." : "Generating Perfect Timetable..."}
                 </>
               ) : (
                 <>
-                  <Upload className="mr-2 h-4 w-4" />
-                  Generate Perfect Timetable
+                  {useEnhancedMode ? (
+                    <Database className="mr-2 h-4 w-4" />
+                  ) : (
+                    <Upload className="mr-2 h-4 w-4" />
+                  )}
+                  {useEnhancedMode ? "Generate Multi-Program Timetable" : "Generate Perfect Timetable"}
                 </>
               )}
             </Button>
@@ -414,7 +511,12 @@ export default function GeneratePage() {
           <CardHeader className="flex flex-row items-center justify-between">
             <div>
               <CardTitle>Generated Timetable Preview</CardTitle>
-              <CardDescription>Review the generated timetable before saving</CardDescription>
+              <CardDescription>
+                {useEnhancedMode ? 
+                  "Multi-program institutional timetable with Genetic Algorithm optimization" : 
+                  "Review the generated timetable before saving"
+                }
+              </CardDescription>
             </div>
             <Button onClick={handleSave} disabled={isSaving}>
               {isSaving ? (
@@ -445,9 +547,11 @@ export default function GeneratePage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {allSlots.map((slot) => (
+                        {timeSlots.map((slot) => (
                           <tr key={slot}>
-                            <td className="border border-gray-300 p-2 font-medium bg-gray-50">{slot}</td>
+                            <td className="border border-gray-300 p-2 font-medium bg-gray-50">
+                              {slot.replace('-', ' - ')}
+                            </td>
                             {days.map((day) => {
                               const cellContent = schedule[day]?.[slot]
                               return (
@@ -455,7 +559,11 @@ export default function GeneratePage() {
                                   {cellContent === "BLOCKED" ? (
                                     <span className="text-gray-400">-</span>
                                   ) : cellContent ? (
-                                    <span className="text-blue-600">{cellContent}</span>
+                                    <span className={
+                                      cellContent.includes("CONFLICT") ? "text-red-600 font-semibold" : "text-blue-600"
+                                    }>
+                                      {cellContent}
+                                    </span>
                                   ) : (
                                     <span className="text-gray-400">Free</span>
                                   )}
