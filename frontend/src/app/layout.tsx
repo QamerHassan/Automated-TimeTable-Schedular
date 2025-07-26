@@ -14,6 +14,25 @@ export const metadata: Metadata = {
   title: "Quantime AI",
   description:
     "Revolutionary AI-powered timetable scheduling system for University of Management and Technology. Create, manage, and optimize academic schedules with artificial intelligence.",
+  icons: [
+    {
+      rel: 'icon',
+      type: 'image/png',
+      sizes: '32x32',
+      url: '/smallicon32.png',
+    },
+    {
+      rel: 'icon',
+      type: 'image/png',
+      sizes: '16x16',
+      url: '/smallicon16.png',
+    },
+    {
+      rel: 'apple-touch-icon',
+      sizes: '180x180',
+      url: '/smallicon.png',
+    },
+  ],
 }
 
 export default function RootLayout({
@@ -23,6 +42,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        <link rel="icon" href="/smallicon32.png" />
+      </head>
       <body className={inter.className}>
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
           <AuthProvider>

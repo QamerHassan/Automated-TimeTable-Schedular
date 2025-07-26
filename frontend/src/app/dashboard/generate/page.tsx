@@ -1,236 +1,3 @@
-// "use client"
-
-// import type React from "react"
-
-// import { useState } from "react"
-// import { Button } from "@/components/ui/button"
-// import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-// import { Input } from "@/components/ui/input"
-// import { Label } from "@/components/ui/label"
-// import { Upload, FileSpreadsheet, Loader2 } from "lucide-react"
-// import { useToast } from "@/hooks/use-toast"
-// import { apiService, type TimetableData } from "@/lib/api"
-
-// export default function GeneratePage() {
-//   const [maxSemester, setMaxSemester] = useState<number>(4)
-//   const [file, setFile] = useState<File | null>(null)
-//   const [isGenerating, setIsGenerating] = useState(false)
-//   const [generatedTimetable, setGeneratedTimetable] = useState<TimetableData | null>(null)
-//   const [isSaving, setIsSaving] = useState(false)
-//   const { toast } = useToast()
-
-//   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-//     const selectedFile = e.target.files?.[0]
-//     if (selectedFile) {
-//       // Validate file type
-//       if (!selectedFile.name.endsWith(".xlsx") && !selectedFile.name.endsWith(".xls")) {
-//         toast({
-//           title: "Invalid file type",
-//           description: "Please upload an Excel file (.xlsx or .xls)",
-//           variant: "destructive",
-//         })
-//         return
-//       }
-//       setFile(selectedFile)
-//     }
-//   }
-
-//   const handleSubmit = async (e: React.FormEvent) => {
-//     e.preventDefault()
-
-//     if (!file) {
-//       toast({
-//         title: "No file selected",
-//         description: "Please upload an Excel file with course data",
-//         variant: "destructive",
-//       })
-//       return
-//     }
-
-//     setIsGenerating(true)
-
-//     try {
-//       const response = await apiService.generateTimetable(maxSemester, file)
-
-//       setGeneratedTimetable(response.timetable_data)
-//       toast({
-//         title: "Success!",
-//         description: response.message,
-//       })
-//     } catch (error) {
-//       console.error("Error generating timetable:", error)
-//       toast({
-//         title: "Generation failed",
-//         description: error instanceof Error ? error.message : "Failed to generate timetable",
-//         variant: "destructive",
-//       })
-//     } finally {
-//       setIsGenerating(false)
-//     }
-//   }
-
-//   const handleSave = async () => {
-//     if (!generatedTimetable) return
-
-//     setIsSaving(true)
-
-//     try {
-//       await apiService.saveTimetable(maxSemester, generatedTimetable)
-
-//       toast({
-//         title: "Saved!",
-//         description: "Timetable has been saved successfully",
-//       })
-
-//       // Reset form
-//       setGeneratedTimetable(null)
-//       setFile(null)
-//       setMaxSemester(4)
-//     } catch (error) {
-//       console.error("Error saving timetable:", error)
-//       toast({
-//         title: "Save failed",
-//         description: error instanceof Error ? error.message : "Failed to save timetable",
-//         variant: "destructive",
-//       })
-//     } finally {
-//       setIsSaving(false)
-//     }
-//   }
-
-//   const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
-//   const timeSlots = [
-//     "08:00 - 09:15",
-//     "09:30 - 10:45",
-//     "11:00 - 12:15",
-//     "12:30 - 13:45",
-//     "14:00 - 15:15",
-//     "15:30 - 16:45",
-//   ]
-//   const labSlots = ["08:00 - 10:30", "11:00 - 13:30", "14:00 - 16:30"]
-//   const allSlots = [...timeSlots, ...labSlots]
-
-//   return (
-//     <div className="container mx-auto p-6 space-y-6">
-//       <div className="flex items-center justify-between">
-//         <h1 className="text-3xl font-bold">Generate Timetable</h1>
-//       </div>
-
-//       <Card>
-//         <CardHeader>
-//           <CardTitle>Upload Course Data</CardTitle>
-//           <CardDescription>Upload an Excel file containing course information, rooms, and student data</CardDescription>
-//         </CardHeader>
-//         <CardContent>
-//           <form onSubmit={handleSubmit} className="space-y-4">
-//             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-//               <div className="space-y-2">
-//                 <Label htmlFor="maxSemester">Maximum Semester</Label>
-//                 <Input
-//                   id="maxSemester"
-//                   type="number"
-//                   min="1"
-//                   max="8"
-//                   value={maxSemester}
-//                   onChange={(e) => setMaxSemester(Number.parseInt(e.target.value))}
-//                   required
-//                 />
-//               </div>
-
-//               <div className="space-y-2">
-//                 <Label htmlFor="file">Course Data File</Label>
-//                 <div className="flex items-center space-x-2">
-//                   <Input id="file" type="file" accept=".xlsx,.xls" onChange={handleFileChange} required />
-//                   <FileSpreadsheet className="h-5 w-5 text-muted-foreground" />
-//                 </div>
-//                 {file && <p className="text-sm text-muted-foreground">Selected: {file.name}</p>}
-//               </div>
-//             </div>
-
-//             <Button type="submit" disabled={isGenerating} className="w-full">
-//               {isGenerating ? (
-//                 <>
-//                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-//                   Generating Perfect Timetable...
-//                 </>
-//               ) : (
-//                 <>
-//                   <Upload className="mr-2 h-4 w-4" />
-//                   Generate Perfect Timetable
-//                 </>
-//               )}
-//             </Button>
-//           </form>
-//         </CardContent>
-//       </Card>
-
-//       {generatedTimetable && (
-//         <Card>
-//           <CardHeader className="flex flex-row items-center justify-between">
-//             <div>
-//               <CardTitle>Generated Timetable Preview</CardTitle>
-//               <CardDescription>Review the generated timetable before saving</CardDescription>
-//             </div>
-//             <Button onClick={handleSave} disabled={isSaving}>
-//               {isSaving ? (
-//                 <>
-//                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-//                   Saving...
-//                 </>
-//               ) : (
-//                 "Save Timetable"
-//               )}
-//             </Button>
-//           </CardHeader>
-//           <CardContent>
-//             <div className="space-y-6">
-//               {Object.entries(generatedTimetable).map(([semesterSection, schedule]) => (
-//                 <div key={semesterSection} className="space-y-4">
-//                   <h3 className="text-lg font-semibold">{semesterSection}</h3>
-//                   <div className="overflow-x-auto">
-//                     <table className="w-full border-collapse border border-gray-300">
-//                       <thead>
-//                         <tr>
-//                           <th className="border border-gray-300 p-2 bg-gray-50">Time</th>
-//                           {days.map((day) => (
-//                             <th key={day} className="border border-gray-300 p-2 bg-gray-50">
-//                               {day}
-//                             </th>
-//                           ))}
-//                         </tr>
-//                       </thead>
-//                       <tbody>
-//                         {allSlots.map((slot) => (
-//                           <tr key={slot}>
-//                             <td className="border border-gray-300 p-2 font-medium bg-gray-50">{slot}</td>
-//                             {days.map((day) => {
-//                               const cellContent = schedule[day]?.[slot]
-//                               return (
-//                                 <td key={day} className="border border-gray-300 p-2 text-sm">
-//                                   {cellContent === "BLOCKED" ? (
-//                                     <span className="text-gray-400">-</span>
-//                                   ) : cellContent ? (
-//                                     <span className="text-blue-600">{cellContent}</span>
-//                                   ) : (
-//                                     <span className="text-gray-400">Free</span>
-//                                   )}
-//                                 </td>
-//                               )
-//                             })}
-//                           </tr>
-//                         ))}
-//                       </tbody>
-//                     </table>
-//                   </div>
-//                 </div>
-//               ))}
-//             </div>
-//           </CardContent>
-//         </Card>
-//       )}
-//     </div>
-//   )
-// }
 "use client"
 
 import type React from "react"
@@ -244,18 +11,17 @@ import { useToast } from "@/hooks/use-toast"
 import { apiService, type TimetableData } from "@/lib/api"
 
 export default function GeneratePage() {
-  const [maxSemester, setMaxSemester] = useState<number>(8) // Changed default to 8
+  const [maxSemester, setMaxSemester] = useState<number>(8)
   const [file, setFile] = useState<File | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
   const [generatedTimetable, setGeneratedTimetable] = useState<TimetableData | null>(null)
   const [isSaving, setIsSaving] = useState(false)
-  const [useEnhancedMode, setUseEnhancedMode] = useState(false) // NEW: Enhanced mode state
+  const [useEnhancedMode, setUseEnhancedMode] = useState(false)
   const { toast } = useToast()
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0]
     if (selectedFile) {
-      // Validate file type
       if (!selectedFile.name.endsWith(".xlsx") && !selectedFile.name.endsWith(".xls")) {
         toast({
           title: "Invalid file type",
@@ -268,11 +34,9 @@ export default function GeneratePage() {
     }
   }
 
-  // UPDATED handleSubmit function with enhanced error handling
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    // MODIFIED VALIDATION: Allow generation without file if using enhanced mode
     if (!file && !useEnhancedMode) {
       toast({
         title: "No file selected",
@@ -285,31 +49,29 @@ export default function GeneratePage() {
     setIsGenerating(true)
 
     try {
-      let response;
-      
+      let response
+
       if (useEnhancedMode) {
-        // NEW: Call enhanced API endpoint without file
-        response = await fetch('http://localhost:8000/api/generate-enhanced/', {
-          method: 'POST',
+        response = await fetch("http://localhost:8000/api/generate-enhanced/", {
+          method: "POST",
           headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
+            "Content-Type": "application/x-www-form-urlencoded",
           },
           body: new URLSearchParams({
-            max_semester: maxSemester.toString()
-          })
-        });
-        
-        const result = await response.json();
-        
-        if (result.status === 'success') {
+            max_semester: maxSemester.toString(),
+          }),
+        })
+
+        const result = await response.json()
+
+        if (result.status === "success") {
           setGeneratedTimetable(result.schedule)
-          
-          // ENHANCED: Better conflict handling and feedback
+
           if (result.conflicts && result.conflicts > 0) {
             toast({
               title: "Timetable Generated with Conflicts",
               description: `Generated timetable has ${result.conflicts} conflicts. Fitness: ${result.fitness}. Conflicts are flagged in red.`,
-              variant: "default", // Changed from "warning" to avoid potential issues
+              variant: "default",
             })
           } else {
             toast({
@@ -318,10 +80,9 @@ export default function GeneratePage() {
             })
           }
         } else {
-          throw new Error(result.message || 'Enhanced generation failed')
+          throw new Error(result.message || "Enhanced generation failed")
         }
       } else {
-        // Original file upload workflow
         const apiResponse = await apiService.generateTimetable(maxSemester, file!)
         setGeneratedTimetable(apiResponse.timetable_data)
         toast({
@@ -355,46 +116,41 @@ export default function GeneratePage() {
     setIsSaving(true)
 
     try {
-      // For enhanced mode, use the new save API format
       if (useEnhancedMode) {
-        const response = await fetch('http://localhost:8000/api/save/', {
-          method: 'POST',
+        const response = await fetch("http://localhost:8000/api/save/", {
+          method: "POST",
           headers: {
-            'Content-Type': 'application/json',
+            "Content-Type": "application/json",
           },
           body: JSON.stringify({
             schedule: generatedTimetable,
-            max_semester: maxSemester
-          })
-        });
+            max_semester: maxSemester,
+          }),
+        })
 
-        const result = await response.json();
-        
-        if (result.status === 'success') {
+        const result = await response.json()
+
+        if (result.status === "success") {
           toast({
             title: "Saved!",
             description: "Enhanced timetable has been saved successfully",
           })
         } else {
-          throw new Error(result.message || 'Save failed')
+          throw new Error(result.message || "Save failed")
         }
       } else {
-        // Original save workflow
         const response = await apiService.saveTimetable(maxSemester, generatedTimetable)
         console.log("Save response:", response)
-
         toast({
           title: "Saved!",
           description: "Timetable has been saved successfully",
         })
       }
 
-      // Reset form
       setGeneratedTimetable(null)
       setFile(null)
       setMaxSemester(8)
       setUseEnhancedMode(false)
-
     } catch (error) {
       console.error("Error saving timetable:", error)
       toast({
@@ -407,55 +163,76 @@ export default function GeneratePage() {
     }
   }
 
-  // Updated time slots to match your enhanced system
-  const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] // Added Saturday
+  const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
   const timeSlots = [
-    "08:00-09:15", "09:30-10:45", "11:00-12:15", "12:30-13:45", 
-    "14:00-15:15", "15:30-16:45", "17:00-18:15", "18:30-19:45", "20:00-21:15" // Extended hours
+    "08:00-09:15",
+    "09:30-10:45",
+    "11:00-12:15",
+    "12:30-13:45",
+    "14:00-15:15",
+    "15:30-16:45",
+    "17:00-18:15",
+    "18:30-19:45",
+    "20:00-21:15",
   ]
 
   return (
     <div className="container mx-auto p-6 space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Generate Timetable</h1>
+        <div>
+          <h1 className="text-3xl font-bold font-display" style={{ color: "var(--foreground)" }}>
+            Smart Timetable Generator
+          </h1>
+          <p className="text-muted-foreground font-ai mt-2">
+            Upload your data and let quantum AI create the perfect schedule
+          </p>
+        </div>
       </div>
 
-      <Card>
+      <Card className="glass-card border-0">
         <CardHeader>
-          <CardTitle>Timetable Generation Options</CardTitle>
-          <CardDescription>
+          <CardTitle className="font-display" style={{ color: "var(--foreground)" }}>
+            Quantum Generation Options
+          </CardTitle>
+          <CardDescription className="font-ai" style={{ color: "var(--secondary-text)" }}>
             Choose between single-program upload or comprehensive multi-program generation
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {/* NEW: Enhanced Mode Toggle */}
-          <div className="mb-6 p-4 border rounded-lg bg-blue-50">
+          {/* Enhanced Mode Toggle */}
+          <div className="mb-6 p-4 border rounded-lg glass-card">
             <div className="flex items-center space-x-3">
               <input
                 type="checkbox"
                 id="enhancedMode"
                 checked={useEnhancedMode}
                 onChange={(e) => setUseEnhancedMode(e.target.checked)}
-                className="w-4 h-4 text-blue-600"
+                className="w-4 h-4 text-primary accent-primary"
               />
               <div className="flex items-center space-x-2">
-                <Database className="h-5 w-5 text-blue-600" />
-                <Label htmlFor="enhancedMode" className="text-sm font-medium cursor-pointer">
+                <Database className="h-5 w-5" style={{ color: "var(--primary)" }} />
+                <Label
+                  htmlFor="enhancedMode"
+                  className="text-sm font-medium cursor-pointer font-ai"
+                  style={{ color: "var(--foreground)" }}
+                >
                   Enhanced Mode - Generate from comprehensive database (All 6 programs, 240+ rooms)
                 </Label>
               </div>
             </div>
             {useEnhancedMode && (
-              <p className="mt-2 text-xs text-blue-600">
+              <p className="mt-2 text-xs font-ai" style={{ color: "var(--primary)" }}>
                 Using pre-loaded institutional data with Genetic Algorithm optimization
               </p>
             )}
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <form onSubmit={handleSubmit} className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-2">
-                <Label htmlFor="maxSemester">Maximum Semester</Label>
+                <Label htmlFor="maxSemester" className="font-ai" style={{ color: "var(--foreground)" }}>
+                  Maximum Semester
+                </Label>
                 <Input
                   id="maxSemester"
                   type="number"
@@ -464,28 +241,45 @@ export default function GeneratePage() {
                   value={maxSemester}
                   onChange={(e) => setMaxSemester(Number.parseInt(e.target.value))}
                   required
+                  className="font-ai"
                 />
                 {useEnhancedMode && (
-                  <p className="text-xs text-gray-600">
+                  <p className="text-xs font-ai" style={{ color: "var(--secondary-text)" }}>
                     Recommended: 8 (covers all programs in database)
                   </p>
                 )}
               </div>
 
-              {/* Only show file input when not in enhanced mode */}
               {!useEnhancedMode && (
                 <div className="space-y-2">
-                  <Label htmlFor="file">Course Data File</Label>
+                  <Label htmlFor="file" className="font-ai" style={{ color: "var(--foreground)" }}>
+                    Course Data File
+                  </Label>
                   <div className="flex items-center space-x-2">
-                    <Input id="file" type="file" accept=".xlsx,.xls" onChange={handleFileChange} required />
+                    <Input
+                      id="file"
+                      type="file"
+                      accept=".xlsx,.xls"
+                      onChange={handleFileChange}
+                      required
+                      className="font-ai"
+                    />
                     <FileSpreadsheet className="h-5 w-5 text-muted-foreground" />
                   </div>
-                  {file && <p className="text-sm text-muted-foreground">Selected: {file.name}</p>}
+                  {file && (
+                    <p className="text-sm font-ai" style={{ color: "var(--secondary-text)" }}>
+                      Selected: {file.name}
+                    </p>
+                  )}
                 </div>
               )}
             </div>
 
-            <Button type="submit" disabled={isGenerating} className="w-full">
+            <Button
+              type="submit"
+              disabled={isGenerating}
+              className="w-full btn-primary text-lg py-6 rounded-xl font-display"
+            >
               {isGenerating ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -493,11 +287,7 @@ export default function GeneratePage() {
                 </>
               ) : (
                 <>
-                  {useEnhancedMode ? (
-                    <Database className="mr-2 h-4 w-4" />
-                  ) : (
-                    <Upload className="mr-2 h-4 w-4" />
-                  )}
+                  {useEnhancedMode ? <Database className="mr-2 h-4 w-4" /> : <Upload className="mr-2 h-4 w-4" />}
                   {useEnhancedMode ? "Generate Multi-Program Timetable" : "Generate Perfect Timetable"}
                 </>
               )}
@@ -507,25 +297,26 @@ export default function GeneratePage() {
       </Card>
 
       {generatedTimetable && (
-        <Card>
+        <Card className="glass-card border-0">
           <CardHeader className="flex flex-row items-center justify-between">
             <div>
-              <CardTitle>Generated Timetable Preview</CardTitle>
-              <CardDescription>
-                {useEnhancedMode ? 
-                  "Multi-program institutional timetable with Genetic Algorithm optimization" : 
-                  "Review the generated timetable before saving"
-                }
+              <CardTitle className="font-display" style={{ color: "var(--foreground)" }}>
+                Generated Smart Schedule
+              </CardTitle>
+              <CardDescription className="font-ai" style={{ color: "var(--secondary-text)" }}>
+                {useEnhancedMode
+                  ? "Multi-program institutional timetable with Genetic Algorithm optimization"
+                  : "Review the generated timetable before saving"}
               </CardDescription>
             </div>
-            <Button onClick={handleSave} disabled={isSaving}>
+            <Button onClick={handleSave} disabled={isSaving} className="btn-primary font-display">
               {isSaving ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   Saving...
                 </>
               ) : (
-                "Save Timetable"
+                "Save to Smart Network"
               )}
             </Button>
           </CardHeader>
@@ -533,39 +324,69 @@ export default function GeneratePage() {
             <div className="space-y-6">
               {Object.entries(generatedTimetable).map(([semesterSection, schedule]) => (
                 <div key={semesterSection} className="space-y-4">
-                  <h3 className="text-lg font-semibold">{semesterSection}</h3>
+                  <h3 className="text-lg font-semibold font-display" style={{ color: "var(--foreground)" }}>
+                    {semesterSection}
+                  </h3>
                   <div className="overflow-x-auto">
-                    <table className="w-full border-collapse border border-gray-300">
+                    <table className="w-full border-collapse border border-gray-300 rounded-lg overflow-hidden">
                       <thead>
-                        <tr>
-                          <th className="border border-gray-300 p-2 bg-gray-50">Time</th>
+                        <tr className="bg-gradient-to-r from-primary/10 to-accent/10">
+                          <th
+                            className="border border-gray-300 p-3 font-ai font-semibold"
+                            style={{ color: "var(--foreground)" }}
+                          >
+                            Time
+                          </th>
                           {days.map((day) => (
-                            <th key={day} className="border border-gray-300 p-2 bg-gray-50">
+                            <th
+                              key={day}
+                              className="border border-gray-300 p-3 font-ai font-semibold"
+                              style={{ color: "var(--foreground)" }}
+                            >
                               {day}
                             </th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
-                        {timeSlots.map((slot) => (
-                          <tr key={slot}>
-                            <td className="border border-gray-300 p-2 font-medium bg-gray-50">
-                              {slot.replace('-', ' - ')}
+                        {timeSlots.map((slot, index) => (
+                          <tr key={slot} className={index % 2 === 0 ? "bg-white/50" : "bg-gray-50/50"}>
+                            <td
+                              className="border border-gray-300 p-3 font-medium font-ai"
+                              style={{ color: "var(--foreground)" }}
+                            >
+                              {slot.replace("-", " - ")}
                             </td>
                             {days.map((day) => {
                               const cellContent = schedule[day]?.[slot]
                               return (
-                                <td key={day} className="border border-gray-300 p-2 text-sm">
+                                <td key={day} className="border border-gray-300 p-2 text-sm font-ai min-h-[60px]">
                                   {cellContent === "BLOCKED" ? (
-                                    <span className="text-gray-400">-</span>
+                                    <span className="text-gray-400 text-center block">-</span>
                                   ) : cellContent ? (
-                                    <span className={
-                                      cellContent.includes("CONFLICT") ? "text-red-600 font-semibold" : "text-blue-600"
-                                    }>
-                                      {cellContent}
-                                    </span>
+                                    <div
+                                      className={`p-2 rounded-lg text-center min-h-[50px] flex items-center justify-center ${
+                                        cellContent.includes("CONFLICT") ? "bg-red-500 text-white" : "text-white"
+                                      }`}
+                                      style={
+                                        !cellContent.includes("CONFLICT") ? { backgroundColor: "var(--primary)" } : {}
+                                      }
+                                    >
+                                      <div>
+                                        <div className="font-semibold text-xs leading-tight">
+                                          {cellContent.split(" - Room")[0]}
+                                        </div>
+                                        {cellContent.includes(" - Room") && !cellContent.includes("CONFLICT") && (
+                                          <div className="text-xs opacity-80 mt-1">
+                                            {cellContent.split(" - Room")[1]
+                                              ? `Room ${cellContent.split(" - Room")[1]}`
+                                              : ""}
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
                                   ) : (
-                                    <span className="text-gray-400">Free</span>
+                                    <span className="text-gray-400 text-center block">Free</span>
                                   )}
                                 </td>
                               )
