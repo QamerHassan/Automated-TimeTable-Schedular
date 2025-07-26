@@ -33,13 +33,43 @@ import { Chatbot } from "@/components/chatbot"
 export default function HomePage() {
   const teamMembers = [
     {
-      name: "Awais",
-      role: "Team Lead & Full-Stack Developer",
+      name: "Awais Ali",
+      role: "Full-Stack & AI Engineer",
       description:
-        "Leading the project with expertise in system architecture and backend development. Passionate about creating scalable solutions.",
-      skills: ["Django", "React", "System Design", "Leadership"],
-      image: "/placeholder.svg?height=300&width=300",
+        "Led system architecture, full-stack development, and AI integration. Built core logic using Django, React, and Next.js. Managed AWS deployment, Git workflows, and overall coordination.",
+      skills: [
+        "Django",
+        "React",
+        "Next.js",
+        "Python",
+        "System Design",
+        "Algorithm",
+        "AWS",
+        "Git & GitHub",
+      ],
+      image: "/images/Awais.jpg",
       icon: Trophy,
+      social: {
+        github: "https://github.com/bettercallawais",
+        linkedin: "#",
+        twitter: "#",
+      },
+    },
+    {
+      name: "Mehdi Ishaq",
+      role: "Backend Logic & AI Engineer",
+      description:
+        "Focused on backend logic, algorithm optimization, and AI integration. Ensured conflict-free scheduling and robust performance.",
+      skills: [
+        "Python",
+        "Backend",
+        "Logic Design",
+        "AI Integration",
+        "Optimization",
+        "Git & GitHub"
+      ],
+      image: "/images/Mahad.jpg",
+      icon: Server,
       social: {
         github: "#",
         linkedin: "#",
@@ -47,11 +77,17 @@ export default function HomePage() {
       },
     },
     {
-      name: "Mahad",
-      role: "Frontend Developer & UI/UX Designer",
+      name: "Kamran Hussain",
+      role: "UI/UX Designer & AWS Support",
       description:
-        "Crafting beautiful and intuitive user interfaces. Specializes in modern web technologies and user experience design.",
-      skills: ["React", "Next.js", "UI/UX", "Tailwind CSS"],
+        "Handled visuals, branding, and AWS deployment. Created logos, banners, and presentation assets for a cohesive visual identity.",
+      skills: [
+        "UI/UX",
+        "Graphic Design",
+        "Branding",
+        "AWS",
+        "Documentation",
+      ],
       image: "/placeholder.svg?height=300&width=300",
       icon: Palette,
       social: {
@@ -61,26 +97,18 @@ export default function HomePage() {
       },
     },
     {
-      name: "Kamran",
-      role: "Backend Developer & Database Architect",
+      name: "Qamar Hassan",
+      role: "Team Ops & Research",
       description:
-        "Building robust backend systems and optimizing database performance. Expert in server-side technologies and API development.",
-      skills: ["Python", "PostgreSQL", "API Design", "DevOps"],
-      image: "/placeholder.svg?height=300&width=300",
-      icon: Server,
-      social: {
-        github: "#",
-        linkedin: "#",
-        twitter: "#",
-      },
-    },
-    {
-      name: "Qamar",
-      role: "AI/ML Engineer & Algorithm Specialist",
-      description:
-        "Developing intelligent algorithms for optimal timetable generation. Specializes in machine learning and optimization techniques.",
-      skills: ["Python", "Machine Learning", "Algorithms", "Data Science"],
-      image: "/placeholder.svg?height=300&width=300",
+        "Managed documentation, prompt writing, budgeting, and assisted in presentations and research.",
+      skills: [
+        "Documentation",
+        "Prompt Engineering",
+        "Research",
+        "Budget Management",
+        "Team Support",
+      ],
+      image: "/images/Qamar.jpg",
       icon: Lightbulb,
       social: {
         github: "#",
@@ -88,6 +116,7 @@ export default function HomePage() {
         twitter: "#",
       },
     },
+
   ]
 
   return (
@@ -136,11 +165,11 @@ export default function HomePage() {
 
               <div className="flex items-center gap-8 pt-4">
                 <div className="text-center">
-                  <div className="text-3xl font-bold text-white">50K+</div>
+                  <div className="text-3xl font-bold text-white">500+</div>
                   <div className="text-white/80 text-sm">Schedules Created</div>
                 </div>
                 <div className="text-center">
-                  <div className="text-3xl font-bold text-white">99.9%</div>
+                  <div className="text-3xl font-bold text-white">90%</div>
                   <div className="text-white/80 text-sm">Accuracy Rate</div>
                 </div>
                 <div className="text-center">
@@ -153,7 +182,7 @@ export default function HomePage() {
             <div className="relative animate-slide-in-right">
               <div className="relative z-10">
                 <Image
-                  src="/placeholder.svg?height=600&width=800"
+                  src="/MainImg.png"
                   alt="AI Timetable Dashboard"
                   width={800}
                   height={600}
@@ -265,24 +294,25 @@ export default function HomePage() {
             {[
               {
                 step: "01",
-                title: "Smart Data Ingestion",
+                title: "Seamless Data Upload",
                 description:
-                  "AI automatically analyzes and validates your course data, detecting patterns and constraints",
+                  "Easily import course, faculty, and room data via Excel or other structured formats. The system intelligently reads and validates the input.",
                 image: "/placeholder.svg?height=300&width=400",
                 icon: Database,
               },
               {
                 step: "02",
-                title: "Neural Processing",
+                title: "AI-Powered Scheduling",
                 description:
-                  "Advanced neural networks generate thousands of optimal scheduling combinations in real-time",
+                  "Our smart engine processes constraints and generates optimal, conflict-free timetables—adapting dynamically to your data.",
                 image: "/placeholder.svg?height=300&width=400",
                 icon: Brain,
               },
               {
                 step: "03",
-                title: "Intelligent Export",
-                description: "AI formats and optimizes your perfect timetable for any platform or format you need",
+                title: "One-Click Export",
+                description:
+                  "Export your finalized timetable in multiple formats, tailored for print, web, or direct integration with existing systems.",
                 image: "/placeholder.svg?height=300&width=400",
                 icon: Sparkles,
               },
@@ -485,7 +515,7 @@ export default function HomePage() {
                   </div>
                   <div>
                     <h4 className="font-semibold text-white">Email Us</h4>
-                    <p className="text-white/80">team@umttimetable.edu.pk</p>
+                    <p className="text-white/80">E.admissions@umt.edu.pk</p>
                   </div>
                 </div>
 

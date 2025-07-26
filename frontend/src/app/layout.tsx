@@ -11,7 +11,7 @@ import { AuthProvider } from "@/components/auth-context"
 const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "UMT Timetable Scheduler - AI-Powered Academic Scheduling",
+  title: "Quantime AI",
   description:
     "Revolutionary AI-powered timetable scheduling system for University of Management and Technology. Create, manage, and optimize academic schedules with artificial intelligence.",
 }

@@ -13,8 +13,8 @@ export function Footer() {
                 <CalendarDays className="h-6 w-6 text-primary-foreground" />
               </div>
               <div>
-                <span className="text-xl font-bold text-white">UMT Timetable</span>
-                <p className="text-sm text-secondary-foreground/80 -mt-1">Scheduler</p>
+                <span className="text-xl font-bold text-white">QuantimeAI</span>
+                <p className="text-sm text-secondary-foreground/80 -mt-1">AI Scheduler</p>
               </div>
             </div>
             <p className="text-secondary-foreground/80 text-sm leading-relaxed">
@@ -96,7 +96,7 @@ export function Footer() {
             <div className="space-y-3">
               <div className="flex items-center gap-3">
                 <MapPin className="h-4 w-4 text-primary" />
-                <span className="text-secondary-foreground/80 text-sm">UMT Campus, Lahore, Pakistan</span>
+                <span className="text-secondary-foreground/80 text-sm">Department of AI, UMT Lahore, Pakistan</span>
               </div>
               <div className="flex items-center gap-3">
                 <Phone className="h-4 w-4 text-primary" />
@@ -104,15 +104,15 @@ export function Footer() {
               </div>
               <div className="flex items-center gap-3">
                 <Mail className="h-4 w-4 text-primary" />
-                <span className="text-secondary-foreground/80 text-sm">support@umt.edu.pk</span>
+                <span className="text-secondary-foreground/80 text-sm">E.admissions@umt.edu.pk</span>
               </div>
             </div>
           </div>
         </div>
 
         <div className="border-t border-white/10 mt-8 pt-8 text-center">
-          <p className="text-secondary-foreground/60 text-sm">
-            &copy; {new Date().getFullYear()} University of Management and Technology. All rights reserved.
+          <p className="text-secondary-foreground/85 text-sm">
+            &copy; {new Date().getFullYear()} QuantimeAI - Department of AI, UMT 
           </p>
         </div>
       </div>
