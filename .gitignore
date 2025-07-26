@@ -1,7 +1,31 @@
-# Python virtual environments
-venv/
-# Python bytecode and cache
+# Python
 __pycache__/
 *.py[cod]
-# Node.js dependencies
-frontend/node_modules/
+*.sqlite3
+db.sqlite3
+
+# Virtual environment
+venv/
+env/
+ENV/
+.venv/
+
+# Django migrations cache
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.sqlite3
+
+# VSCode and JetBrains
+.vscode/
+.idea/
+
+# Node
+node_modules/
+
+# Next.js
+.next/
+
+
+
