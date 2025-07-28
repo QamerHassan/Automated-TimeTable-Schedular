@@ -15,7 +15,7 @@ export default function ViewPage() {
 
   const loadTimetables = async () => {
     try {
-      const response = await apiService.getTimetables()
+      const response = await apiService.data()
       if (response.success && response.data) {
         setTimetables(response.data)
       }
