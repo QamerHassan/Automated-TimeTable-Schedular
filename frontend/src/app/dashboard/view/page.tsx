@@ -6,6 +6,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Download, Trash2, Calendar, Loader2 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { apiService, type Timetable } from "@/lib/api"
+import { MainNav } from "@/components/main-nav"
+import { Footer } from "@/components/footer"
 
 export default function ViewPage() {
   const [timetables, setTimetables] = useState<Timetable[]>([])
@@ -16,8 +18,17 @@ export default function ViewPage() {
   const loadTimetables = async () => {
     try {
       const response = await apiService.getTimetables()
+<<<<<<< Updated upstream
       if (response.success && response.data) {
         setTimetables(response.data)
+=======
+      console.log("API Response:", response) // Debug log
+      if (response.success && response.timetables) {
+        console.log("Timetables data:", response.timetables) // Debug log
+        setTimetables(response.timetables)
+      } else {
+        console.log("No timetables found or invalid response structure") // Debug log
+>>>>>>> Stashed changes
       }
     } catch (error) {
       console.error("Error loading timetables:", error)
@@ -63,124 +74,167 @@ export default function ViewPage() {
 
   const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
   const timeSlots = [
-    "08:00 - 09:15",
-    "09:30 - 10:45",
-    "11:00 - 12:15",
-    "12:30 - 13:45",
-    "14:00 - 15:15",
-    "15:30 - 16:45",
+    "08:00-09:15",
+    "09:30-10:45",  
+    "11:00-12:15",
+    "12:30-13:45",
+    "14:00-15:15",
+    "15:30-16:45",
+    "17:00-18:15",
+    "18:30-19:45",
+    "20:00-21:15"
   ]
-  const labSlots = ["08:00 - 10:30", "11:00 - 13:30", "14:00 - 16:30"]
+  const labSlots = ["08:00-10:30", "11:00-13:30", "14:00-16:30"]
   const allSlots = [...timeSlots, ...labSlots]
+
+  // Helper function to get cell content with proper time slot matching
+  const getCellContent = (schedule: any, day: string, slot: string) => {
+    // The backend stores time slots as "08:00-09:15" (without spaces)
+    // The frontend now uses the same format for matching
+    let cellContent = schedule[day]?.[slot]
+    
+    // Debug logging for troubleshooting
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`Looking for slot "${slot}" on ${day}:`, {
+        found: cellContent,
+        availableSlots: Object.keys(schedule[day] || {}),
+        scheduleData: schedule[day]
+      })
+    }
+    
+    return cellContent
+  }
 
   if (isLoading) {
     return (
-      <div className="container mx-auto p-6">
-        <div className="flex items-center justify-center h-64">
-          <Loader2 className="h-8 w-8 animate-spin" />
-          <span className="ml-2">Loading timetables...</span>
+      <div className="min-h-screen bg-gradient-to-br from-background to-muted">
+        <MainNav />
+        <div className="container mx-auto p-6">
+          <div className="flex items-center justify-center h-64">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <span className="ml-2 font-body text-primary-dark">Loading timetables...</span>
+          </div>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">View Timetables</h1>
-        <div className="flex items-center space-x-2">
-          <Calendar className="h-5 w-5" />
-          <span className="text-sm text-muted-foreground">
-            {timetables.length} timetable{timetables.length !== 1 ? "s" : ""} saved
-          </span>
+    <div className="min-h-screen bg-gradient-to-br from-background to-muted">
+      <MainNav />
+      
+      <div className="container mx-auto px-4 py-8">
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h1 className="text-4xl font-bold font-hero text-primary-dark">View Timetables</h1>
+            <p className="text-xl font-body text-primary-dark/70 mt-2">
+              Access and manage your previously created schedules
+            </p>
+          </div>
+          <div className="flex items-center space-x-2 glass-badge-primary px-4 py-2 rounded-full">
+            <Calendar className="h-5 w-5 text-primary" />
+            <span className="text-sm font-body text-primary">
+              {timetables.length} timetable{timetables.length !== 1 ? "s" : ""} saved
+            </span>
+          </div>
         </div>
+
+        {timetables.length === 0 ? (
+          <Card className="glass-card-enhanced border-0 bg-white/90">
+            <CardContent className="flex flex-col items-center justify-center py-12">
+              <Calendar className="h-12 w-12 text-primary/60 mb-4" />
+              <h3 className="text-lg font-semibold font-display text-primary-dark mb-2">No timetables found</h3>
+              <p className="font-body text-primary-dark/70 text-center">Generate your first timetable to see it here</p>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="space-y-6">
+            {timetables.map((timetable) => (
+              <Card key={timetable.id} className="glass-card-enhanced border-0 bg-white/90 hover:shadow-lg transition-all duration-300">
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <div>
+                    <CardTitle className="font-display text-primary-dark">
+                      Timetable for Semesters 1-{timetable.semester}
+                    </CardTitle>
+                    <CardDescription className="font-body text-primary-dark/70">
+                      Created on {new Date(timetable.created_at).toLocaleDateString()}
+                    </CardDescription>
+                  </div>
+                  <div className="flex space-x-2">
+                    <Button 
+                      onClick={() => handleDownload(timetable.id)}
+                      className="font-display bg-white border border-primary/20 text-primary hover:bg-primary/10 px-3 py-1 text-sm"
+                    >
+                      <Download className="h-4 w-4 mr-2" />
+                      Download Excel
+                    </Button>
+                    <Button
+                      onClick={() => handleDelete(timetable.id)}
+                      disabled={deletingId === timetable.id}
+                      className="font-display bg-red-500 text-white hover:bg-red-600 px-3 py-1 text-sm"
+                    >
+                      {deletingId === timetable.id ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-4 w-4 mr-2" />
+                      )}
+                      Delete
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-6">
+                    {Object.entries(timetable.data).map(([semesterSection, schedule]) => (
+                      <div key={semesterSection} className="space-y-4">
+                        <h3 className="text-lg font-semibold font-display text-primary-dark">{semesterSection}</h3>
+                        <div className="overflow-x-auto">
+                          <table className="w-full border-collapse border border-gray-300 rounded-lg overflow-hidden">
+                            <thead>
+                              <tr className="bg-gradient-to-r from-primary/10 to-accent/10">
+                                <th className="border border-gray-300 p-3 font-body font-semibold text-primary-dark">Time</th>
+                                {days.map((day) => (
+                                  <th key={day} className="border border-gray-300 p-3 font-body font-semibold text-primary-dark">
+                                    {day}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {allSlots.map((slot, index) => (
+                                <tr key={slot} className={index % 2 === 0 ? "bg-white/50" : "bg-gray-50/50"}>
+                                  <td className="border border-gray-300 p-3 font-medium font-body text-primary-dark">{slot.replace("-", " - ")}</td>
+                                  {days.map((day) => {
+                                    const cellContent = getCellContent(schedule, day, slot)
+                                    return (
+                                      <td key={day} className="border border-gray-300 p-2 text-sm font-body min-w-[120px]">
+                                        {cellContent === "BLOCKED" ? (
+                                          <span className="text-gray-400 text-center block">-</span>
+                                        ) : cellContent ? (
+                                          <div className="p-2 rounded-lg text-center min-h-[40px] flex items-center justify-center text-white break-words" style={{ backgroundColor: '#6e73ff', border: '1px solid #4a5568' }}>
+                                            <span className="font-semibold text-xs leading-tight">{cellContent}</span>
+                                          </div>
+                                        ) : (
+                                          <span className="text-gray-400 text-center block">Free</span>
+                                        )}
+                                      </td>
+                                    )
+                                  })}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
       </div>
 
-      {timetables.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <Calendar className="h-12 w-12 text-muted-foreground mb-4" />
-            <h3 className="text-lg font-semibold mb-2">No timetables found</h3>
-            <p className="text-muted-foreground text-center">Generate your first timetable to see it here</p>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-6">
-          {timetables.map((timetable) => (
-            <Card key={timetable.id}>
-              <CardHeader className="flex flex-row items-center justify-between">
-                <div>
-                  <CardTitle>Timetable for Semesters 1-{timetable.semester}</CardTitle>
-                  <CardDescription>Created on {new Date(timetable.created_at).toLocaleDateString()}</CardDescription>
-                </div>
-                <div className="flex space-x-2">
-                  <Button variant="outline" size="sm" onClick={() => handleDownload(timetable.id)}>
-                    <Download className="h-4 w-4 mr-2" />
-                    Download Excel
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    onClick={() => handleDelete(timetable.id)}
-                    disabled={deletingId === timetable.id}
-                  >
-                    {deletingId === timetable.id ? (
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-4 w-4 mr-2" />
-                    )}
-                    Delete
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-6">
-                  {Object.entries(timetable.data).map(([semesterSection, schedule]) => (
-                    <div key={semesterSection} className="space-y-4">
-                      <h3 className="text-lg font-semibold">{semesterSection}</h3>
-                      <div className="overflow-x-auto">
-                        <table className="w-full border-collapse border border-gray-300">
-                          <thead>
-                            <tr>
-                              <th className="border border-gray-300 p-2 bg-gray-50">Time</th>
-                              {days.map((day) => (
-                                <th key={day} className="border border-gray-300 p-2 bg-gray-50">
-                                  {day}
-                                </th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {allSlots.map((slot) => (
-                              <tr key={slot}>
-                                <td className="border border-gray-300 p-2 font-medium bg-gray-50">{slot}</td>
-                                {days.map((day) => {
-                                  const cellContent = schedule[day]?.[slot]
-                                  return (
-                                    <td key={day} className="border border-gray-300 p-2 text-sm">
-                                      {cellContent === "BLOCKED" ? (
-                                        <span className="text-gray-400">-</span>
-                                      ) : cellContent ? (
-                                        <span className="text-blue-600">{cellContent}</span>
-                                      ) : (
-                                        <span className="text-gray-400">Free</span>
-                                      )}
-                                    </td>
-                                  )
-                                })}
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
+      <Footer />
     </div>
   )
 }

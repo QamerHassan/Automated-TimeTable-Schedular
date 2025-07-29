@@ -1,6 +1,9 @@
-from django.urls import path
+from django.urls import path, include
 from rest_framework_simplejwt.views import TokenRefreshView
 from . import views, api_views, auth_views
+from django.contrib import admin
+from django.conf import settings
+from django.conf.urls.static import static
 
 urlpatterns = [
     # Web views (original ones maintained)
@@ -13,10 +16,7 @@ urlpatterns = [
     
     # NEW ENHANCED GENETIC ALGORITHM ROUTES
     path('generate-enhanced/', views.generate_enhanced_timetable, name='generate_enhanced_timetable'),
-    # REMOVED: path('generate-original/', views.generate_original_timetable, name='generate_original_timetable'),
     path('generate-enhanced-web/', views.generate_enhanced_web, name='generate_enhanced_web'),
-    path('validate-enhanced/', views.validate_enhanced_schedule, name='validate_enhanced_schedule'),
-    path('schedule-stats/', views.get_schedule_statistics, name='get_schedule_statistics'),
     
     # API endpoints (original ones maintained)
     path('api/generate/', api_views.generate_timetable_api, name='generate_timetable_api'),
@@ -27,8 +27,6 @@ urlpatterns = [
     
     # NEW ENHANCED API ENDPOINTS
     path('api/generate-enhanced/', views.generate_enhanced_timetable, name='generate_enhanced_timetable_api'),
-    path('api/validate-enhanced/', views.validate_enhanced_schedule, name='validate_enhanced_schedule_api'),
-    path('api/schedule-stats/', views.get_schedule_statistics, name='get_schedule_statistics_api'),
     
     # Auth endpoints (maintained)
     path('api/auth/register/', auth_views.register, name='register'),
@@ -38,4 +36,9 @@ urlpatterns = [
     path('api/auth/profile/', auth_views.get_user_profile, name='get_user_profile'),
     path('api/auth/profile/update/', auth_views.update_user_profile, name='update_user_profile'),
     path('api/auth/change-password/', auth_views.change_password, name='change_password'),
+    path('api/auth/profile/upload-avatar/', auth_views.upload_avatar, name='upload_avatar'),
 ]
+
+
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

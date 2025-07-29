@@ -10,6 +10,11 @@ from django.core.exceptions import ValidationError
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 import logging
+import os
+from django.conf import settings
+from django.core.files.storage import default_storage
+from django.core.files.base import ContentFile
+
 
 logger = logging.getLogger(__name__)
 
@@ -268,6 +273,72 @@ def change_password(request):
     
     except Exception as e:
         logger.error(f"Error in change_password: {str(e)}", exc_info=True)
+        return Response({
+            'error': f'Internal server error: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def upload_avatar(request):
+    """Upload user avatar"""
+    try:
+        if 'avatar' not in request.FILES:
+            return Response({
+                'error': 'No avatar file provided'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        avatar_file = request.FILES['avatar']
+        
+        # Validate file type
+        allowed_types = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
+        if avatar_file.content_type not in allowed_types:
+            return Response({
+                'error': 'Invalid file type. Please upload an image file.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Validate file size (5MB max)
+        if avatar_file.size > 5 * 1024 * 1024:
+            return Response({
+                'error': 'File too large. Please upload an image smaller than 5MB.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        user = request.user
+        
+        # Create avatars directory if it doesn't exist
+        avatars_dir = os.path.join(settings.MEDIA_ROOT, 'avatars')
+        os.makedirs(avatars_dir, exist_ok=True)
+        
+        # Generate unique filename
+        file_extension = os.path.splitext(avatar_file.name)[1]
+        filename = f"user_{user.id}_avatar{file_extension}"
+        file_path = os.path.join('avatars', filename)
+        
+        # Delete old avatar if exists
+        old_avatar_path = os.path.join(settings.MEDIA_ROOT, 'avatars', f"user_{user.id}_avatar.*")
+        import glob
+        for old_file in glob.glob(old_avatar_path.replace('.*', '*')):
+            try:
+                os.remove(old_file)
+            except:
+                pass
+        
+        # Save the new file
+        saved_path = default_storage.save(file_path, ContentFile(avatar_file.read()))
+        
+        # Construct the URL
+        avatar_url = f"{settings.MEDIA_URL}{saved_path}"
+        
+        logger.info(f"Avatar uploaded for user: {user.username} at {avatar_url}")
+        
+        return Response({
+            'success': True,
+            'message': 'Avatar uploaded successfully',
+            'avatar_url': avatar_url
+        }, status=status.HTTP_200_OK)
+    
+    except Exception as e:
+        logger.error(f"Error in upload_avatar: {str(e)}", exc_info=True)
         return Response({
             'error': f'Internal server error: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

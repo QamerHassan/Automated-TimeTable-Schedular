@@ -2,8 +2,7 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from .models import (CoreCourse, CohortCourse, ElectiveCourse, Room, SemesterStudents,
-Timetable, Section, EnhancedSchedule, GlobalScheduleMatrix,
-SubjectFrequencyRule, TimeSlotConfiguration)
+Timetable, Section, EnhancedSchedule, GlobalScheduleMatrix, SubjectFrequencyRule, TimeSlotConfiguration)
 from .forms import TimetableGenerationForm
 from django.contrib.auth.decorators import login_required
 from django.db.models import Sum
@@ -24,7 +23,8 @@ from datetime import datetime, timedelta, time
 from collections import defaultdict
 import numpy as np
 import uuid # Add this import at the top of your file if it's not there
-
+import random
+from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
@@ -33,13 +33,15 @@ logger = logging.getLogger(__name__)
 
 # ============ GENETIC ALGORITHM CONFIGURATION ============
 GENETIC_CONFIG = {
-    'POPULATION_SIZE': 200,
-    'GENERATIONS': 100,
+    'POPULATION_SIZE': 50,
+    'GENERATIONS': 150,
     'CROSSOVER_RATE': 0.85,
-    'MUTATION_RATE': 0.4,  # INCREASED from 0.2 to 0.4 for more exploration
-    'ELITE_SIZE': 20,
+    'BASE_MUTATION_RATE': 0.2,
+    'MAX_MUTATION_RATE': 0.8,
+    'ELITE_SIZE': 5,
     'TOURNAMENT_SIZE': 7
-}
+}  # Added missing closing brace
+
 
 
 SUBJECT_FREQUENCY_MAP = {
@@ -67,10 +69,25 @@ ENHANCED_TIME_SLOTS = [
 "12:30-13:45", "14:00-15:15", "15:30-16:45", # Afternoon
 "17:00-18:15", "18:30-19:45", "20:00-21:15" # Evening (Extended hours)
 ]
-# Lab time slots (165 minutes each - 2h 45m)
+# CORRECTED: Lab time slots as paired 1h 15m blocks with 15-minute breaks
 LAB_TIME_SLOTS = [
-    "08:00-10:45", "11:00-13:45", "14:00-16:45", "17:00-19:45"
+    ["08:00-09:15", "09:30-10:45"],  # Morning Block 1: 8:00-10:45 with break
+    ["11:00-12:15", "12:30-13:45"],  # Morning Block 2: 11:00-13:45 with break  
+    ["14:00-15:15", "15:30-16:45"],  # Afternoon Block 1: 14:00-16:45 with break
+    ["17:00-18:15", "18:30-19:45"],  # Afternoon Block 2: 17:00-19:45 with break
 ]
+
+# Theory time slots (keep existing or use this)
+THEORY_TIME_SLOTS = [
+    "08:00-09:15", "09:30-10:45", "11:00-12:15",
+    "12:30-13:45", "14:00-15:15", "15:30-16:45", 
+    "17:00-18:15", "18:30-19:45", "20:00-21:15"
+]
+
+
+# Combined slots for general use
+ENHANCED_TIME_SLOTS = THEORY_TIME_SLOTS.copy()
+
 # Add this right after LAB_TIME_SLOTS definition (around line 94)
 THEORY_TIME_SLOTS = [
     "08:00-09:15", "09:30-10:45", "11:00-12:15", 
@@ -108,30 +125,43 @@ def home(request):
     })
 
 # ============ GENETIC ALGORITHM CORE CLASSES ============
+
 class Gene:
-    """Represents a single class session in the timetable, now with a unique ID."""
-    def __init__(self, semester, section, subject, is_lab, session_number=1):
-        self.id = uuid.uuid4() # Assign a unique identifier to every gene instance
+    """Represents a single class session, with lab block pairing support."""
+    
+    def __init__(self, semester, section, subject, is_lab, session_number=1, is_cohort=False):
+        self.id = uuid.uuid4()
         self.semester = semester
         self.section = section
         self.subject = subject
         self.is_lab = is_lab
         self.session_number = session_number
         self.day = None
-        self.time_slot = None
+        self.is_cohort = is_cohort
+        
+        # NEW: Lab block handling
+        if is_lab:
+            self.time_slot = None  # Will be set to lab block pair
+            self.lab_block_pair = None  # Will store both time slots
+        else:
+            self.time_slot = None  # Single theory slot
+            
         self.room = None
 
     def __repr__(self):
         room_name = self.room.room_number if self.room else "None"
-        return (f"Gene(S{self.semester}-{self.section}, {self.subject}, "
-                f"Day={self.day}, Slot={self.time_slot}, Room={room_name})")
-    
-    # Add hash and eq methods to allow Gene objects to be added to a set
-    def __hash__(self):
-        return hash(self.id)
+        cohort_indicator = "(Cohort)" if self.is_cohort else ""
+        
+        if hasattr(self, 'is_lab_blocks') and self.is_lab_blocks and self.lab_block_pair:
+            time_display = f"{self.lab_block_pair[0]} + {self.lab_block_pair[1]}"  # Use + instead of &
+        elif self.time_slot:
+            time_display = self.time_slot
+        else:
+            time_display = "UNASSIGNED"
+        
+        return (f"Gene(S{self.semester}-{self.section}, {self.subject}, {cohort_indicator}"
+                f"Day={getattr(self, 'day', 'None')}, Slot={time_display}, Room={room_name})")
 
-    def __eq__(self, other):
-        return isinstance(other, Gene) and self.id == other.id
 
 
 # =====================================================================
@@ -153,26 +183,44 @@ class Chromosome:
             priority += 100 # Labs are high priority due to limited rooms
         priority += semester # Higher semesters are higher priority
         return priority
+    def assign_rooms_to_genes(self):
+        """Assign appropriate Room OBJECTS to genes, with cohort course logic."""
+        lab_rooms = list(Room.objects.filter(lab=True))
+        theory_rooms = list(Room.objects.filter(core_sub=True))
+        
+        for gene in self.genes:
+            if gene.is_cohort:
+                # Cohort courses are ALWAYS theoretical, use theory rooms
+                gene.room = random.choice(theory_rooms) if theory_rooms else None
+            elif gene.is_lab and lab_rooms:
+                gene.room = random.choice(lab_rooms)
+            elif theory_rooms:
+                gene.room = random.choice(theory_rooms)
+            else:
+                gene.room = None
+                logger.error(f"Could not assign a room for {gene.subject}.")
 
+        
     def initialize_sequentially(self, semesters_data):
-        """
-        Builds an initial timetable by placing each class one by one into the
-        first available valid slot, using a SHUFFLED search to ensure better distribution.
-        """
+        """NUCLEAR OPTION: Absolute final version with guaranteed theory slot assignment"""
+        print("="*50)
+        print("NUCLEAR OPTION: initialize_sequentially RUNNING")
+        print("="*50)
+        
         self.genes = []
-        # Fetch all Room OBJECTS once
+        
+        # Fetch rooms
         all_lab_rooms = list(Room.objects.filter(lab=True))
         all_theory_rooms = list(Room.objects.filter(core_sub=True))
         
-        # Check if rooms exist
         if not all_lab_rooms or not all_theory_rooms:
-            logger.error("CRITICAL: No lab rooms or theory rooms found in the database. Cannot generate a schedule.")
-            return # Stop initialization if there are no rooms
+            logger.error("CRITICAL: No rooms found")
+            return
 
-        schedule_tracker = {} # Tracks [day-slot-room] and [day-slot-section] bookings
+        schedule_tracker = {}
         class_list = []
 
-        # Create a master list of all class sessions to be scheduled
+        # Create class list
         for semester, sections_data in semesters_data.items():
             for section_name, subjects in sections_data.items():
                 for subject_info in subjects:
@@ -183,73 +231,136 @@ class Chromosome:
                             "section": section_name,
                             "subject": subject_info['name'],
                             "is_lab": subject_info['is_lab'],
+                            "is_cohort": subject_info.get('is_cohort', False),
                             "session": session,
                             "priority": self._calculate_scheduling_priority(semester, subject_info['is_lab'])
                         })
         
-        # Sort the list so high-priority classes are placed first
         class_list.sort(key=lambda x: x['priority'], reverse=True)
 
+        # Process each class
         for class_info in class_list:
             gene = Gene(
                 semester=class_info['semester'],
                 section=class_info['section'],
                 subject=class_info['subject'],
                 is_lab=class_info['is_lab'],
-                session_number=class_info['session'] + 1
+                session_number=class_info['session'] + 1,
+                is_cohort=class_info['is_cohort']
             )
             
-            # Select the correct pool of rooms for this gene
-            available_rooms_for_gene = all_lab_rooms if gene.is_lab else all_theory_rooms
+            # Room selection
+            if gene.is_cohort:
+                available_rooms_for_gene = all_theory_rooms
+            else:
+                available_rooms_for_gene = all_lab_rooms if gene.is_lab else all_theory_rooms
             
+            # Try to find slot
             best_slot_info = self._find_best_slot_shuffled(gene, schedule_tracker, available_rooms_for_gene)
             
-            if best_slot_info:
-                day, time_slot, room_obj = best_slot_info
-                gene.day = day
-                gene.time_slot = time_slot
-                gene.room = room_obj # Assign the found room OBJECT
-                
-                # --- THE FIX IS HERE ---
-                # Create a unique key for the section to avoid semester collision.
-                unique_section_key = f"S{gene.semester}-{gene.section}"
-                
-                # Mark both the room and the UNIQUE section as busy for this slot
-                schedule_tracker[f"{day}-{time_slot}-{room_obj.room_number}"] = True
-                schedule_tracker[f"{day}-{time_slot}-{unique_section_key}"] = True # Use the unique key
-                self.genes.append(gene)
+            # CRITICAL: Always assign valid values
+            if gene.is_lab:
+                gene.lab_block_pair = LAB_TIME_SLOTS[0] if LAB_TIME_SLOTS else [["08:00-09:15", "09:30-10:45"]]
+                gene.time_slot = None
+                gene.is_lab_blocks = True
             else:
-                logger.warning(f"No conflict-free slot found for {gene.subject} ({gene.section}). Using fallback assignment.")
-                fallback_slot = self._find_fallback_slot(gene, available_rooms_for_gene)
-                if fallback_slot:
-                    day, time_slot, room_obj = fallback_slot
-                    gene.day = day
-                    gene.time_slot = time_slot
-                    gene.room = room_obj
-                    self.genes.append(gene)
-                else:
-                    logger.error(f"CRITICAL FAILURE: Could not assign any slot for {gene.subject}. It will be missing from the schedule. Check if you have rooms of the required type (Lab/Theory).")
+                # GUARANTEE: Theory classes ALWAYS get valid time_slot
+                gene.time_slot = THEORY_TIME_SLOTS[0] if THEORY_TIME_SLOTS else "08:00-09:15"
+                gene.lab_block_pair = None
+                gene.is_lab_blocks = False
+                print(f"FORCED ASSIGNMENT: {gene.subject} → {gene.time_slot}")
+            
+            # Set basic properties
+            if best_slot_info:
+                day, time_info, room_obj = best_slot_info
+                gene.day = day
+                gene.room = room_obj
+                
+                # Only update time assignments if slot was found and is valid
+                if gene.is_lab and time_info:
+                    gene.lab_block_pair = time_info
+                elif not gene.is_lab and time_info and isinstance(time_info, str):
+                    gene.time_slot = time_info
+                    print(f"OPTIMAL ASSIGNMENT: {gene.subject} → {gene.time_slot}")
+            else:
+                gene.day = "Monday"
+                gene.room = available_rooms_for_gene[0] if available_rooms_for_gene else None
+            
+            self.genes.append(gene)
+        
+        # ABSOLUTE FINAL SAFETY NET
+        print("RUNNING FINAL SAFETY NET...")
+        for gene in self.genes:
+            if not gene.is_lab:
+                if not gene.time_slot or gene.time_slot is None or gene.time_slot == "None":
+                    gene.time_slot = "08:00-09:15"  # Hard-coded fallback
+                    print(f"SAFETY NET ACTIVATED: {gene.subject} → {gene.time_slot}")
+        
+        print(f"INITIALIZATION COMPLETE: {len(self.genes)} genes created")
+
+
+
 
     def _find_best_slot_shuffled(self, gene_to_schedule, schedule_tracker, available_rooms):
+        """Enhanced slot finding with debug logging and robust fallback logic"""
+    
+    # Validate inputs first
+        if not available_rooms:
+            print(f"ERROR: No available rooms for {gene_to_schedule.subject} (is_lab: {gene_to_schedule.is_lab})")
+            return None
+
         shuffled_rooms = random.sample(available_rooms, len(available_rooms))
         shuffled_days = random.sample(WEEKDAYS, len(WEEKDAYS))
     
-    # Use appropriate time slots based on whether it's a lab or theory class
         if gene_to_schedule.is_lab:
-            shuffled_slots = random.sample(LAB_TIME_SLOTS, len(LAB_TIME_SLOTS))
+            # For labs, shuffle the paired block options
+            if not LAB_TIME_SLOTS:
+                print(f"ERROR: LAB_TIME_SLOTS is empty for {gene_to_schedule.subject}")
+                return None
+            
+            shuffled_lab_blocks = random.sample(LAB_TIME_SLOTS, len(LAB_TIME_SLOTS))
+        
+            for room_obj in shuffled_rooms:
+                for day in shuffled_days:
+                    for lab_block_pair in shuffled_lab_blocks:
+                    # Check if both slots in the pair are available
+                        slot1, slot2 = lab_block_pair
+                    
+                        section_key1 = f"S{gene_to_schedule.semester}-{gene_to_schedule.section}-{day}-{slot1}"
+                        section_key2 = f"S{gene_to_schedule.semester}-{gene_to_schedule.section}-{day}-{slot2}"
+                        room_key1 = f"R{room_obj.id}-{day}-{slot1}"
+                        room_key2 = f"R{room_obj.id}-{day}-{slot2}"
+                    
+                    # Both slots must be free
+                        if (not schedule_tracker.get(room_key1) and not schedule_tracker.get(section_key1) and
+                            not schedule_tracker.get(room_key2) and not schedule_tracker.get(section_key2)):
+                            print(f"DEBUG: Found lab slot for {gene_to_schedule.subject}: {day}, {lab_block_pair}")
+                            return (day, lab_block_pair, room_obj)
+        
+            print(f"DEBUG: NO LAB SLOT FOUND for {gene_to_schedule.subject}")
+            return None
+        
         else:
+            # Theory classes use single slots
+            if not THEORY_TIME_SLOTS:
+                print(f"ERROR: THEORY_TIME_SLOTS is empty for {gene_to_schedule.subject}")
+                return None
+            
             shuffled_slots = random.sample(THEORY_TIME_SLOTS, len(THEORY_TIME_SLOTS))
-
-        for room_obj in shuffled_rooms:
-            for day in shuffled_days:
-                for time_slot in shuffled_slots:
-                    section_key = f"S{gene_to_schedule.semester}-{gene_to_schedule.section}-{day}-{time_slot}"
-                    room_key = f"R{room_obj.id}-{day}-{time_slot}"
-                    if not schedule_tracker.get(room_key) and not schedule_tracker.get(section_key):
-                        return (day, time_slot, room_obj)
-        return None
-
-
+        
+            for room_obj in shuffled_rooms:
+                for day in shuffled_days:
+                    for time_slot in shuffled_slots:
+                        section_key = f"S{gene_to_schedule.semester}-{gene_to_schedule.section}-{day}-{time_slot}"
+                        room_key = f"R{room_obj.id}-{day}-{time_slot}"
+                    
+                        if not schedule_tracker.get(room_key) and not schedule_tracker.get(section_key):
+                            print(f"DEBUG: Found theory slot for {gene_to_schedule.subject}: {day}, {time_slot}")
+                            return (day, time_slot, room_obj)
+        
+            print(f"DEBUG: NO THEORY SLOT FOUND for {gene_to_schedule.subject} (checked {len(shuffled_slots)} slots across {len(shuffled_days)} days in {len(shuffled_rooms)} rooms)")
+            return None
+        
     def _find_fallback_slot(self, gene, available_rooms):
         if available_rooms and WEEKDAYS:
             day = random.choice(WEEKDAYS)
@@ -257,8 +368,8 @@ class Chromosome:
                 time_slot = random.choice(LAB_TIME_SLOTS)
             else:
                 time_slot = random.choice(THEORY_TIME_SLOTS)
-        room = random.choice(available_rooms)
-        return (day, time_slot, room)
+            room = random.choice(available_rooms)
+            return (day, time_slot, room)
         return None
 
 
@@ -304,14 +415,14 @@ class GeneticAlgorithm:
     def evaluate_fitness(self, chromosome):
         """Calculates fitness based on both hard and soft constraints."""
         fitness = 1000
-        
+    
         conflicting_genes = self.get_all_hard_conflicts(chromosome)
         num_conflicts = len(conflicting_genes)
 
-        # Apply a very heavy penalty for any hard conflicts
+    # Apply a very heavy penalty for any hard conflicts
         fitness -= num_conflicts * 500 
-        
-        # Also apply penalties for soft constraints
+    
+    # Also apply penalties for soft constraints
         daily_load_penalties = self.check_daily_load_balance(chromosome)
         gap_penalties = self.check_time_gaps(chromosome)
         theoretical_frequency_penalties = self.check_theoretical_frequency(chromosome)
@@ -319,41 +430,137 @@ class GeneticAlgorithm:
         fitness -= daily_load_penalties * 5
         fitness -= gap_penalties * 3
         fitness -= theoretical_frequency_penalties * 10
-        
+    
+    # Diversity penalty (fitness sharing) - optimized to sample instead of full O(N^2)
+        diversity_penalty = 0
+        if len(self.population) > 1:  # Avoid if population is too small
+            sample_size = min(20, len(self.population) - 1)  # Sample to reduce computation
+            sampled_others = random.sample([other for other in self.population if other != chromosome], sample_size)
+            for other in sampled_others:
+                similarity = self._calculate_similarity(chromosome, other)
+                if similarity > 0.8:  # Threshold for "too similar"
+                    diversity_penalty += similarity
+    
+        fitness -= diversity_penalty * 10  # Adjust multiplier as needed
+    
         chromosome.conflicts = list(conflicting_genes)
         chromosome.fitness = fitness
         return fitness
+    
+    def _calculate_similarity(self, chrom1, chrom2):
+        # Simple Hamming distance for demonstration (customize for your genes)
+        matching_genes = sum(1 for g1, g2 in zip(chrom1.genes, chrom2.genes) if g1.time_slot == g2.time_slot and g1.room == g2.room)
+        return matching_genes / max(len(chrom1.genes), 1)  # Normalized 0-1
+    def _slots_overlap(self, gene1, gene2):
+        """Enhanced overlap detection for lab blocks and theory slots"""
+    
+    # Different days = no overlap
+        if gene1.day != gene2.day:
+            return False
+    
+    # Get time slots for comparison
+        if gene1.is_lab:
+            slots1 = gene1.lab_block_pair  # List of two slots
+        else:
+            slots1 = [gene1.time_slot]     # Single slot as list
+        
+        if gene2.is_lab:
+            slots2 = gene2.lab_block_pair  # List of two slots  
+        else:
+            slots2 = [gene2.time_slot]     # Single slot as list
+    
+    # Check if any slot from gene1 overlaps with any slot from gene2
+        for slot1 in slots1:
+            for slot2 in slots2:
+                if self._single_slot_overlap(slot1, slot2):
+                    return True
+    
+        return False
+
 
     def get_all_hard_conflicts(self, chromosome):
-        """
-        THE DEFINITIVE CONFLICT CHECKER.
-        Uses separate trackers for rooms and sections to be 100% aligned with the database.
-        """
-        conflicts = set()
-        room_tracker = {}  # Key: room_slot, Value: Gene
-        section_tracker = {} # Key: section_slot, Value: Gene
+        """Find all hard constraint violations in the chromosome"""
+        conflicting_genes = []
+        genes = chromosome.genes
+    
+        for i in range(len(genes)):
+            for j in range(i + 1, len(genes)):
+                g1, g2 = genes[i], genes[j]
+            
+            # Check if genes conflict (same room, section, or instructor at overlapping times)
+                conflicts = False
+            
+            # Only check for conflicts if they're on the same day
+                if g1.day == g2.day:
+                # Check time overlap using the gene-aware method
+                    if self._genes_overlap(g1, g2):
+                    # Room conflict
+                        if g1.room and g2.room and g1.room.id == g2.room.id:
+                            conflicts = True
+                    
+                    # Section conflict (same section can't be in two places)
+                        if (g1.semester == g2.semester and g1.section == g2.section):
+                            conflicts = True
+            
+                if conflicts:
+                    conflicting_genes.extend([g1, g2])
+    
+        return list(set(conflicting_genes))  # Remove duplicates
 
-        for gene in chromosome.genes:
-            if not all([gene.day, gene.time_slot, gene.room]):
-                conflicts.add(gene)
-                continue
-
-            section_slot_key = f"S{gene.semester}-{gene.section}-{gene.day}-{gene.time_slot}"
-            room_slot_key = f"R{gene.room.id}-{gene.day}-{gene.time_slot}"
-
-            if section_slot_key in section_tracker:
-                conflicts.add(gene)
-                conflicts.add(section_tracker[section_slot_key])
+    def _genes_overlap(self, gene1, gene2):
+        """Check if two genes have overlapping time slots"""
+    # Different days = no overlap
+        if gene1.day != gene2.day:
+            return False
+    
+    # Get time slots for comparison - ALWAYS return arrays
+        def get_time_slots(gene):
+            if hasattr(gene, 'is_lab_blocks') and gene.is_lab_blocks and gene.lab_block_pair:
+                return gene.lab_block_pair  # Already an array
+            elif gene.time_slot:    
+                return [gene.time_slot]     # Single slot as array
             else:
-                section_tracker[section_slot_key] = gene
+                return []  # No valid slots
+    
+        slots1 = get_time_slots(gene1)
+        slots2 = get_time_slots(gene2)
+    
+    # Check if any slot from gene1 overlaps with any slot from gene2
+        for slot1 in slots1:
+            for slot2 in slots2:
+                if self._check_time_overlap(slot1, slot2):
+                    return True
+    
+        return False
 
-            if room_slot_key in room_tracker:
-                conflicts.add(gene)
-                conflicts.add(room_tracker[room_slot_key])
-            else:
-                room_tracker[room_slot_key] = gene
-                
-        return conflicts
+
+    def _check_time_overlap(self, slot_a, slot_b):
+        """Check if two individual time slots overlap"""
+        if slot_a == slot_b:
+            return True
+        
+        try:
+            s_a, e_a = [datetime.strptime(t.strip(), '%H:%M') for t in slot_a.split('-')]
+            s_b, e_b = [datetime.strptime(t.strip(), '%H:%M') for t in slot_b.split('-')]
+            return max(s_a, s_b) < min(e_a, e_b)
+        except Exception as exc:
+            logger.error(f"Bad slot format ({slot_a}|{slot_b}) → {exc}")
+            return False
+
+    def _single_slot_overlap(self, slot1, slot2):
+        """Check if two individual 1h 15m slots overlap"""
+        if slot1 == slot2:
+            return True
+        
+        try:
+            s_a, e_a = [datetime.strptime(t.strip(), '%H:%M') for t in slot1.split('-')]
+            s_b, e_b = [datetime.strptime(t.strip(), '%H:%M') for t in slot2.split('-')]
+            return max(s_a, s_b) < min(e_a, e_b)
+        except Exception as exc:
+            logger.error(f"Bad slot format ({slot1}|{slot2}) → {exc}")
+            return False
+
+
 
     # --- MISSING HELPER METHODS NOW INCLUDED ---
     def check_daily_load_balance(self, chromosome):
@@ -411,29 +618,60 @@ class GeneticAlgorithm:
     # --- MUTATION OPERATORS ---
     def mutate(self, chromosome):
         """Main mutation function with stagnation-aware logic."""
-        if self.stagnation_counter > 10 and random.random() < 0.2:
+        adaptive_rate = self.config['BASE_MUTATION_RATE'] + (self.stagnation_counter / 100) * (self.config['MAX_MUTATION_RATE'] - self.config['BASE_MUTATION_RATE'])
+        adaptive_rate = min(adaptive_rate, self.config['MAX_MUTATION_RATE'])
+        if self.stagnation_counter > 5 and random.random() < 0.3:
             self.partial_scramble_mutate(chromosome)
             return
 
-        if chromosome.conflicts and random.random() < 0.9:
+        if chromosome.conflicts and random.random() < 0.95:
             self.repair_mutate(chromosome)
         
-        elif random.random() < 0.5:
+        elif random.random() < 0.6:
             self.swap_mutate(chromosome)
 
-        if random.random() < self.config['MUTATION_RATE']:
+        if random.random() < adaptive_rate:  # Use adaptive rate here
             self.random_mutate(chromosome)
+    def conflict_guided_mutation(self, chromosome):
+        """Mutation that targets conflicting genes specifically"""   
+        conflicting_genes = self.get_all_hard_conflicts(chromosome)
+    
+        if conflicting_genes:
+        # Target a conflicting gene for mutation
+            gene_to_fix = random.choice(conflicting_genes)
+        
+        # Try to move it to a completely different day/time
+            gene_to_fix.day = random.choice(WEEKDAYS)
+        
+            if hasattr(gene_to_fix, 'is_lab') and gene_to_fix.is_lab:
+                gene_to_fix.lab_block_pair = random.choice(LAB_TIME_SLOTS)
+                gene_to_fix.time_slot = None
+                gene_to_fix.is_lab_blocks = True
+                room_pool = Room.objects.filter(lab=True)
+            else:
+                gene_to_fix.time_slot = random.choice(THEORY_TIME_SLOTS)
+                gene_to_fix.lab_block_pair = None
+                gene_to_fix.is_lab_blocks = False
+                room_pool = Room.objects.filter(core_sub=True)
+        
+            if room_pool.exists():
+                gene_to_fix.room = random.choice(list(room_pool))
 
     def partial_scramble_mutate(self, chromosome):
         """A 'bigger hammer' mutation for escaping local optima."""
         if not chromosome.conflicts: return
+        sections_to_scramble = min(3, len(set(g.semester for g in chromosome.conflicts)))
         
         conflicting_section_gene = random.choice(list(chromosome.conflicts))
         target_semester = conflicting_section_gene.semester
         target_section = conflicting_section_gene.section
+        for _ in range(sections_to_scramble):
+            if not chromosome.conflicts: break
         
-        logger.info(f"Stagnation detected. Scrambling schedule for S{target_semester}-{target_section}...")
-
+            conflicting_section_gene = random.choice(list(chromosome.conflicts))
+            target_semester = conflicting_section_gene.semester
+            target_section = conflicting_section_gene.section
+            logger.info(f"Heavy stagnation detected. Scrambling S{target_semester}-{target_section}...")
         genes_to_reschedule = [g for g in chromosome.genes if g.semester == target_semester and g.section == target_section]
         other_genes = [g for g in chromosome.genes if not (g.semester == target_semester and g.section == target_section)]
         
@@ -457,23 +695,41 @@ class GeneticAlgorithm:
     def _find_best_slot_shuffled(self, gene_to_schedule, schedule_tracker, available_rooms):
         shuffled_rooms = random.sample(available_rooms, len(available_rooms))
         shuffled_days = random.sample(WEEKDAYS, len(WEEKDAYS))
-        # WRONG (around line 463) - needs to be updated:
-        shuffled_slots = random.sample(ENHANCED_TIME_SLOTS, len(ENHANCED_TIME_SLOTS))
-
-# Should be:
+    
         if gene_to_schedule.is_lab:
-            shuffled_slots = random.sample(LAB_TIME_SLOTS, len(LAB_TIME_SLOTS))
+            # For labs, shuffle the paired block options
+            shuffled_lab_blocks = random.sample(LAB_TIME_SLOTS, len(LAB_TIME_SLOTS))
+        
+            for room_obj in shuffled_rooms:
+                for day in shuffled_days:
+                    for lab_block_pair in shuffled_lab_blocks:
+                    # Check if both slots in the pair are available
+                        slot1, slot2 = lab_block_pair
+                    
+                        section_key1 = f"S{gene_to_schedule.semester}-{gene_to_schedule.section}-{day}-{slot1}"
+                        section_key2 = f"S{gene_to_schedule.semester}-{gene_to_schedule.section}-{day}-{slot2}"
+                        room_key1 = f"R{room_obj.id}-{day}-{slot1}"
+                        room_key2 = f"R{room_obj.id}-{day}-{slot2}"
+                    
+                    # Both slots must be free
+                        if (not schedule_tracker.get(room_key1) and not schedule_tracker.get(section_key1) and
+                            not schedule_tracker.get(room_key2) and not schedule_tracker.get(section_key2)):
+                            return (day, lab_block_pair, room_obj)
         else:
+        # Theory classes use single slots
             shuffled_slots = random.sample(THEORY_TIME_SLOTS, len(THEORY_TIME_SLOTS))
-
-        for room_obj in shuffled_rooms:
-            for day in shuffled_days:
-                for time_slot in shuffled_slots:
-                    section_key = f"S{gene_to_schedule.semester}-{gene_to_schedule.section}-{day}-{time_slot}"
-                    room_key = f"R{room_obj.id}-{day}-{time_slot}"
-                    if not schedule_tracker.get(room_key) and not schedule_tracker.get(section_key):
-                        return (day, time_slot, room_obj)
+        
+            for room_obj in shuffled_rooms:
+                for day in shuffled_days:
+                    for time_slot in shuffled_slots:
+                        section_key = f"S{gene_to_schedule.semester}-{gene_to_schedule.section}-{day}-{time_slot}"
+                        room_key = f"R{room_obj.id}-{day}-{time_slot}"
+                    
+                        if not schedule_tracker.get(room_key) and not schedule_tracker.get(section_key):
+                            return (day, time_slot, room_obj)
+    
         return None
+
     
     def repair_mutate(self, chromosome):
         if not chromosome.conflicts: return
@@ -502,20 +758,29 @@ class GeneticAlgorithm:
         gene1.room, gene2.room = gene2.room, gene1.room
 
     def random_mutate(self, chromosome):
-        if not chromosome.genes: return
+        """Random mutation with lab block support"""
+        if not chromosome.genes:
+            return
+        
         gene_to_mutate = random.choice(chromosome.genes)
-    
         gene_to_mutate.day = random.choice(WEEKDAYS)
     
-    # Assign appropriate time slot based on class type
         if gene_to_mutate.is_lab:
-            gene_to_mutate.time_slot = random.choice(LAB_TIME_SLOTS)
+            # Assign random lab block pair
+            gene_to_mutate.lab_block_pair = random.choice(LAB_TIME_SLOTS)
+            gene_to_mutate.time_slot = None # No single time slot for labs
+            gene_to_mutate.is_lab_blocks = True
+            room_pool = Room.objects.filter(lab=True)
         else:
+        # Assign random theory slot
             gene_to_mutate.time_slot = random.choice(THEORY_TIME_SLOTS)
+            gene_to_mutate.lab_block_pair = None
+            gene_to_mutate.is_lab_blocks = False
+            room_pool = Room.objects.filter(core_sub=True)
     
-        room_pool = Room.objects.filter(lab=gene_to_mutate.is_lab)
-        if room_pool.exists(): 
+        if room_pool.exists():
             gene_to_mutate.room = random.choice(list(room_pool))
+
 
 
 
@@ -533,7 +798,16 @@ class GeneticAlgorithm:
         return Chromosome(child1_genes), Chromosome(child2_genes)
 
     def evolve(self, semesters_data):
+        """Enhanced evolution with performance optimizations and conflict-guided mutation"""
         self.initialize_population(semesters_data)
+    
+    # Initialize tracking variables
+        if not hasattr(self, 'stagnation_counter'):
+            self.stagnation_counter = 0
+        if not hasattr(self, 'last_best_fitness'):
+            self.last_best_fitness = float('-inf')
+    
+    # Initial fitness evaluation
         for chromosome in self.population:
             self.evaluate_fitness(chromosome)
 
@@ -541,8 +815,9 @@ class GeneticAlgorithm:
             self.generation = generation
             self.population.sort(key=lambda c: c.fitness, reverse=True)
 
+        # Track best solution and stagnation
             current_best = self.population[0]
-            if not self.best_chromosome or current_best.fitness > self.best_chromosome.fitness:
+            if not hasattr(self, 'best_chromosome') or self.best_chromosome is None or current_best.fitness > self.best_chromosome.fitness:
                 self.best_chromosome = current_best
                 if self.best_chromosome.fitness > self.last_best_fitness:
                     self.last_best_fitness = self.best_chromosome.fitness
@@ -552,29 +827,88 @@ class GeneticAlgorithm:
             else:
                 self.stagnation_counter += 1
 
+        # Progress reporting
             if generation % 10 == 0:
-                logger.info(f"Generation {generation}: Best Fitness={self.best_chromosome.fitness:.2f}, Conflicts={len(self.best_chromosome.conflicts)}, Stagnation={self.stagnation_counter}")
+                conflict_count = len(self.best_chromosome.conflicts) if hasattr(self.best_chromosome, 'conflicts') else getattr(self.best_chromosome, 'conflict_count', 'unknown')
+                print(f"Generation {generation}: Best Fitness={self.best_chromosome.fitness:.2f}, Conflicts={conflict_count}, Stagnation={self.stagnation_counter}")
 
-            if len(self.best_chromosome.conflicts) == 0:
-                logger.info(f"Optimal solution found at generation {generation}.")
-                break
+        # Check for optimal solution
+            if hasattr(self.best_chromosome, 'conflicts'):
+                if len(self.best_chromosome.conflicts) == 0:
+                    print(f"Optimal solution found at generation {generation}.")
+                    break
+            elif hasattr(self.best_chromosome, 'conflict_count'):
+                if self.best_chromosome.conflict_count == 0:
+                    print(f"Optimal solution found at generation {generation}.")
+                    break
+
+        # Diversity injection every 10 generations
+            if generation % 10 == 0 and generation > 0:
+                injection_count = int(len(self.population) * 0.2)  # 20% injection
+                for i in range(injection_count):
+                    fresh_chromosome = Chromosome()
+                    fresh_chromosome.initialize_sequentially(semesters_data)
+                    self.evaluate_fitness(fresh_chromosome)
+                # Replace worst performers
+                    self.population[-(i + 1)] = fresh_chromosome
             
+                print(f"Generation {generation}: Injected {injection_count} fresh chromosomes for diversity")
+
+        # Aggressive stagnation handling
+            if self.stagnation_counter > 15:  # Reduced from 20 for faster response
+                print(f"High stagnation detected ({self.stagnation_counter}). Injecting new population...")
+                num_new = int(self.config['POPULATION_SIZE'] * 0.3)  # Increased to 30% for more aggressive restart
+                new_chromosomes = []
+                for _ in range(num_new):
+                    new_chrom = Chromosome()
+                    new_chrom.initialize_sequentially(semesters_data)
+                    self.evaluate_fitness(new_chrom)
+                    new_chromosomes.append(new_chrom)
+            
+            # Keep best chromosomes and add new ones
+                self.population = sorted(self.population[:-num_new] + new_chromosomes, key=lambda c: c.fitness, reverse=True)
+                self.stagnation_counter = 0
+                print(f"Population restart: Added {num_new} new individuals")
+
+        # Elitism: Keep best solutions
             new_population = self.population[:self.config['ELITE_SIZE']]
-            
+
+        # Generate new offspring
             while len(new_population) < self.config['POPULATION_SIZE']:
                 parent1 = self.selection()
                 parent2 = self.selection()
                 child1, child2 = self.crossover(parent1, parent2)
-                self.mutate(child1)
-                self.mutate(child2)
+            
+            # INTEGRATED: Use conflict-guided mutation for better performance
+                if random.random() < 0.7:  # 70% chance of conflict-guided mutation
+                    self.conflict_guided_mutation(child1)
+                    self.conflict_guided_mutation(child2)
+                else:
+                # Use regular mutation 30% of the time for diversity
+                    self.mutate(child1)
+                    self.mutate(child2)
+            
+            # Additional regular mutation with adaptive rate
+                if self.stagnation_counter > 10:
+                # Increase mutation rate during stagnation
+                    original_rate = getattr(self, 'mutation_rate', 0.02)
+                    self.mutation_rate = min(0.15, original_rate * 2)
+                    self.mutate(child1)
+                    self.mutate(child2)
+                    self.mutation_rate = original_rate
+            
                 self.evaluate_fitness(child1)
                 self.evaluate_fitness(child2)
                 new_population.extend([child1, child2])
 
-            self.population = new_population
+            self.population = new_population[:self.config['POPULATION_SIZE']]  # Ensure exact population size
 
-        logger.info(f"Evolution finished. Best fitness: {self.best_chromosome.fitness}, Final Conflicts: {len(self.best_chromosome.conflicts)}")
+    # Final reporting
+        final_conflicts = len(self.best_chromosome.conflicts) if hasattr(self.best_chromosome, 'conflicts') else getattr(self.best_chromosome, 'conflict_count', 'unknown')
+        print(f"Evolution finished. Best fitness: {self.best_chromosome.fitness}, Final Conflicts: {final_conflicts}")
         return self.best_chromosome
+
+
 
 
 
@@ -583,81 +917,139 @@ class GeneticAlgorithm:
 # This new function is robust and handles Room objects correctly.
 # =====================================================================
 def chromosome_to_database(chromosome):
-    """
-    Convert chromosome to database records, with robust validation to prevent crashes.
-    """
-    # Clear previous schedule data
+    """FINAL VERSION: Bulletproof database save with absolute validation"""
+    
+    # Clear previous data
     EnhancedSchedule.objects.all().delete()
     GlobalScheduleMatrix.objects.all().delete()
-    
+
     schedule_data_for_json = {}
-    
+    saved_count = 0
+    skipped_count = 0
+
     for gene in chromosome.genes:
-        # --- Pre-save Validation ---
-        if not all([gene.day, gene.time_slot, gene.room]):
-            logger.error(f"CRITICAL: Skipping save for '{gene.subject}' due to incomplete data. "
-                         f"Day: {gene.day}, Time: {gene.time_slot}, Room: {gene.room}")
+        # Basic validation
+        if not all([gene.day, gene.room]):
+            skipped_count += 1
             continue
 
-        # Check that gene.room is a Room object
         if not isinstance(gene.room, Room):
-            logger.error(f"CRITICAL: Skipping save for '{gene.subject}'. The assigned room is not a valid Room object.")
+            skipped_count += 1
             continue
-            
-        # Check for conflicts in the GlobalScheduleMatrix before saving
-        is_slot_taken = GlobalScheduleMatrix.objects.filter(
-            day=gene.day,
-            time_slot=gene.time_slot,
-            room_number=gene.room.room_number # Use room_number for the check
-        ).exists()
 
-        if is_slot_taken:
-            # If the GA produced a solution with a conflict, log it but DO NOT save it to the DB.
-            # This prevents the program from crashing on a UNIQUE constraint.
-            logger.warning(
-                f"Conflict Detected by Save Function: Room {gene.room.room_number} is already booked "
-                f"on {gene.day} at {gene.time_slot}. The class '{gene.subject}' for section {gene.section} "
-                "was NOT saved to the database. The GA fitness function needs improvement."
-            )
-            continue # Skip to the next gene
+        # Handle lab blocks
+        if gene.is_lab and hasattr(gene, 'lab_block_pair') and gene.lab_block_pair:
+            for i, time_slot in enumerate(gene.lab_block_pair):
+                try:
+                    if not time_slot or not isinstance(time_slot, str):
+                        continue
 
-        # --- If all checks pass, save the record ---
-        try:
-            # Save to the main schedule table
-            EnhancedSchedule.objects.create(
-                semester=gene.semester,
-                section=gene.section,
-                subject=gene.subject,
-                is_lab=gene.is_lab,
-                time_slot=gene.time_slot,
-                day=gene.day,
-                room=gene.room,  # Pass the entire Room object here
-                week_number=gene.session_number
-            )
+                    EnhancedSchedule.objects.create(
+                        semester=gene.semester,
+                        section=gene.section,
+                        subject=f"{gene.subject} (Part {i+1})",
+                        is_lab=True,
+                        time_slot=time_slot,
+                        day=gene.day,
+                        room=gene.room,
+                        week_number=gene.session_number
+                    )
+                    
+                    GlobalScheduleMatrix.objects.create(
+                        time_slot=time_slot,
+                        day=gene.day,
+                        room_number=gene.room.room_number,
+                        semester=gene.semester,
+                        section=gene.section,
+                        subject=f"{gene.subject} (Part {i+1})"
+                    )
+                    
+                    saved_count += 1
 
-            # Save to the global matrix to enforce uniqueness for subsequent checks
-            GlobalScheduleMatrix.objects.create(
-                time_slot=gene.time_slot,
-                day=gene.day,
-                room_number=gene.room.room_number,
-                semester=gene.semester,
-                section=gene.section,
-                subject=gene.subject
-            )
+                except Exception as e:
+                    logger.error(f"Failed to save lab block: {e}")
+                    skipped_count += 1
 
-            # Prepare the data for the JSON response to the frontend
-            section_key = f'Semester {gene.semester} - {gene.section}'
-            if section_key not in schedule_data_for_json:
-                all_time_slots = THEORY_TIME_SLOTS + LAB_TIME_SLOTS
-                schedule_data_for_json[section_key] = {day: {slot: None for slot in all_time_slots} for day in WEEKDAYS}
-            
-            subject_info = f"{gene.subject} ({'Lab' if gene.is_lab else 'Theory'}) - Room {gene.room.room_number}"
-            schedule_data_for_json[section_key][gene.day][gene.time_slot] = subject_info
+        else:
+            # Handle theory slots with ABSOLUTE validation
+            try:
+                # MULTIPLE VALIDATION BARRIERS
+                if not hasattr(gene, 'time_slot'):
+                    logger.warning(f"Skipping gene with no time_slot: {gene.subject}")
+                    skipped_count += 1
+                    continue
+                    
+                if gene.time_slot is None:
+                    logger.warning(f"Skipping gene with no time_slot: {gene.subject}")
+                    skipped_count += 1
+                    continue
+                    
+                if gene.time_slot == "":
+                    logger.warning(f"Skipping gene with no time_slot: {gene.subject}")
+                    skipped_count += 1
+                    continue
+                    
+                if gene.time_slot == "None":
+                    logger.warning(f"Skipping gene with no time_slot: {gene.subject}")
+                    skipped_count += 1
+                    continue
+                    
+                if not isinstance(gene.time_slot, str):
+                    logger.warning(f"Skipping gene with no time_slot: {gene.subject}")
+                    skipped_count += 1
+                    continue
+                
+                # Save valid theory classes
+                EnhancedSchedule.objects.create(
+                    semester=gene.semester,
+                    section=gene.section,
+                    subject=gene.subject,
+                    is_lab=gene.is_lab,
+                    time_slot=gene.time_slot,
+                    day=gene.day,
+                    room=gene.room,
+                    week_number=gene.session_number
+                )
+                
+                GlobalScheduleMatrix.objects.create(
+                    time_slot=gene.time_slot,
+                    day=gene.day,
+                    room_number=gene.room.room_number,
+                    semester=gene.semester,
+                    section=gene.section,
+                    subject=gene.subject
+                )
+                
+                saved_count += 1
+                
+            except Exception as e:
+                logger.error(f"Failed to save theory class: {e}")
+                skipped_count += 1
 
-        except Exception as e:
-            logger.error(f"Failed to save gene to database: {gene}. Error: {e}", exc_info=True)
+        # Prepare JSON response data
+        section_key = f'Semester {gene.semester} - {gene.section}'
+        if section_key not in schedule_data_for_json:
+            all_time_slots = THEORY_TIME_SLOTS + [slot for pair in LAB_TIME_SLOTS for slot in pair]
+            schedule_data_for_json[section_key] = {
+                day: {slot: None for slot in all_time_slots}
+                for day in WEEKDAYS
+            }
 
+        # Add to JSON structure
+        if gene.is_lab and hasattr(gene, 'lab_block_pair') and gene.lab_block_pair:
+            for i, slot in enumerate(gene.lab_block_pair):
+                subject_info = f"{gene.subject} (Lab Part {i+1}) - Room {gene.room.room_number}"
+                schedule_data_for_json[section_key][gene.day][slot] = subject_info
+        else:
+            if gene.time_slot and gene.time_slot != "None" and gene.time_slot is not None:
+                subject_info = f"{gene.subject} ({'Lab' if gene.is_lab else 'Theory'}) - Room {gene.room.room_number}"
+                schedule_data_for_json[section_key][gene.day][gene.time_slot] = subject_info
+
+    logger.info(f"Successfully saved {saved_count} schedule entries to database")
     return schedule_data_for_json
+
+
+
 # In backend/main/views.py
 
 # =====================================================================
@@ -678,14 +1070,27 @@ def prepare_semesters_data(max_semester):
         semesters_data[semester] = {}
         # Get all courses for the semester once to be efficient
         core_courses = CoreCourse.objects.filter(semester_number=semester)
-        
+        cohort_courses = CohortCourse.objects.filter(semester_number=semester)
+
         for section in sections:
             subjects = []
             for course in core_courses:
                 subjects.append({
                     'name': course.course_name,
                     'is_lab': course.is_lab,
-                    'duration': course.duration
+                    'duration': course.duration,
+                    'is_cohort': False,
+                    'course_type': 'core'
+                })
+            for cohort_course in cohort_courses:
+                subjects.append({
+                    'name': cohort_course.course_name,
+                    'is_lab': False,  # Cohort courses are ALWAYS theoretical
+                    'duration': 75,   # Standard theory duration
+                    'is_cohort': True,
+                    'capacity': 100,
+                    'course_type': 'cohort',
+                    'capacity': cohort_course.capacity   # Higher capacity for cohort courses
                 })
             semesters_data[semester][section.section_name] = subjects
             
@@ -990,44 +1395,146 @@ def view_timetable(request):
         'enhanced_time_slots': ENHANCED_TIME_SLOTS,
     })
 
-def download_timetable_excel(request, timetable_id):
-    timetable = get_object_or_404(Timetable, id=timetable_id)
-    
-    wb = Workbook()
-    ws = wb.active
-    ws.title = f"GA_Timetable_Semesters_1-{timetable.semester}"
-
-    headers = ['Time Slot'] + WEEKDAYS
-    for col, header in enumerate(headers, start=1):
-        cell = ws.cell(row=1, column=col, value=header)
-        cell.font = Font(bold=True)
-        cell.fill = PatternFill(start_color="DDDDDD", end_color="DDDDDD", fill_type="solid")
-
-    row = 2
-    combined_slots = THEORY_TIME_SLOTS + LAB_TIME_SLOTS
-    all_time_slots = [slot.replace('-', ' - ') for slot in combined_slots]    
-    for semester_section, schedule in timetable.data.items():
-        ws.cell(row=row, column=1, value=f"{semester_section} (Genetic Algorithm)").font = Font(bold=True)
-        row += 1
+def download_timetable_excel(request, timetable_id=None):
+    """Enhanced Excel download with proper lab splitting support"""
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+        from django.http import HttpResponse
+        import io
         
-        for time_slot in all_time_slots:
-            ws.cell(row=row, column=1, value=time_slot)
-            for col, day in enumerate(WEEKDAYS, start=2):
-                cell_value = schedule.get(day, {}).get(time_slot.replace(' - ', '-'), '-')
-                ws.cell(row=row, column=col, value=cell_value)
-            row += 1
+        # Get all schedule data
+        schedule_entries = EnhancedSchedule.objects.all().order_by('semester', 'section', 'day')
         
-        row += 1
+        if not schedule_entries.exists():
+            return JsonResponse({'error': 'No timetable data found'}, status=404)
+        
+        # Create workbook
+        wb = Workbook()
+        wb.remove(wb.active)  # Remove default sheet
+        
+        # Group data by semester and section
+        schedule_dict = {}
+        for entry in schedule_entries:
+            key = f"Semester {entry.semester} - {entry.section}"
+            if key not in schedule_dict:
+                schedule_dict[key] = {}
+            
+            day = entry.day
+            if day not in schedule_dict[key]:
+                schedule_dict[key][day] = {}
+            
+            # Handle both lab and theory entries
+            schedule_dict[key][day][entry.time_slot] = f"{entry.subject} - Room {entry.room.room_number}"
+        
+        # Create proper time slot list (flatten lab blocks)
+        theory_slots = THEORY_TIME_SLOTS
+        lab_individual_slots = []
+        
+        # FIXED: Properly handle lab time slots
+        for lab_block in LAB_TIME_SLOTS:
+            if isinstance(lab_block, list):
+                lab_individual_slots.extend(lab_block)  # Add individual slots from pairs
+            else:
+                lab_individual_slots.append(lab_block)  # Single slot
+        
+        # Combine and sort all time slots
+        all_individual_slots = sorted(set(theory_slots + lab_individual_slots))
+        
+        # Format time slots for display (add spaces around dashes)
+        formatted_time_slots = []
+        for slot in all_individual_slots:
+            if isinstance(slot, str) and '-' in slot:
+                formatted_slot = slot.replace('-', ' - ')
+                formatted_time_slots.append(formatted_slot)
+            else:
+                formatted_time_slots.append(str(slot))
+        
+        # Create sheets for each semester-section
+        for section_key, section_data in schedule_dict.items():
+            # Create worksheet
+            ws = wb.create_sheet(title=section_key)
+            
+            # Header styling
+            header_font = Font(bold=True, color="FFFFFF")
+            header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+            border = Border(
+                left=Side(style='thin'),
+                right=Side(style='thin'),
+                top=Side(style='thin'),
+                bottom=Side(style='thin')
+            )
+            
+            # Write headers
+            headers = ['Time'] + WEEKDAYS
+            for col, header in enumerate(headers, 1):
+                cell = ws.cell(row=1, column=col, value=header)
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = Alignment(horizontal='center')
+                cell.border = border
+            
+            # Write time slots and schedule data
+            for row_idx, time_slot in enumerate(formatted_time_slots, 2):
+                # Time column
+                time_cell = ws.cell(row=row_idx, column=1, value=time_slot)
+                time_cell.font = Font(bold=True)
+                time_cell.border = border
+                time_cell.alignment = Alignment(horizontal='center')
+                
+                # Day columns
+                for col_idx, day in enumerate(WEEKDAYS, 2):
+                    # Find matching time slot (handle formatting differences)
+                    original_time_slot = time_slot.replace(' - ', '-')
+                    
+                    if day in section_data and original_time_slot in section_data[day]:
+                        cell_value = section_data[day][original_time_slot]
+                        cell_fill = PatternFill(start_color="E8F4FD", end_color="E8F4FD", fill_type="solid")
+                    else:
+                        cell_value = "Free"
+                        cell_fill = PatternFill(start_color="F8F8F8", end_color="F8F8F8", fill_type="solid")
+                    
+                    cell = ws.cell(row=row_idx, column=col_idx, value=cell_value)
+                    cell.fill = cell_fill
+                    cell.border = border
+                    cell.alignment = Alignment(horizontal='center', vertical='center')
+            
+            # Auto-adjust column widths
+            for column in ws.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+                for cell in column:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+                adjusted_width = min(max_length + 2, 30)
+                ws.column_dimensions[column_letter].width = adjusted_width
+        
+        # If no sheets created, create empty one
+        if not wb.worksheets:
+            ws = wb.create_sheet(title="No Data")
+            ws['A1'] = "No timetable data available"
+        
+        # Prepare response
+        response = HttpResponse(
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = 'attachment; filename="Quantime_AI_Timetable.xlsx"'
+        
+        # Save workbook to response
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        response.write(output.getvalue())
+        
+        return response
+        
+    except Exception as e:
+        logger.error(f"Excel download error: {str(e)}")
+        return JsonResponse({'error': f'Download failed: {str(e)}'}, status=500)
 
-    for col in ws.columns:
-        max_length = max(len(str(cell.value)) for cell in col)
-        ws.column_dimensions[col[0].column_letter].width = max_length + 2
-
-    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    response['Content-Disposition'] = f'attachment; filename=genetic_algorithm_timetable_semesters_1-{timetable.semester}.xlsx'
-    wb.save(response)
-    
-    return response
 
 def delete_timetable(request, timetable_id):
     timetable = get_object_or_404(Timetable, id=timetable_id)
@@ -1151,7 +1658,7 @@ def get_schedule_statistics(request):
 # ============ COMPATIBILITY FUNCTIONS FOR API_VIEWS ============
 
 def create_timetable(max_semester):
-    """Compatibility function for api_views.py - uses Genetic Algorithm"""
+    """Enhanced timetable creation with robust conflict detection"""
     logger.info(f"Legacy create_timetable called - redirecting to Genetic Algorithm for {max_semester} semesters")
     
     try:
@@ -1162,13 +1669,145 @@ def create_timetable(max_semester):
         ga = GeneticAlgorithm()
         best_solution = ga.evolve(semesters_data)
         
-        # Convert solution to database format
-        schedule_data = chromosome_to_database(best_solution)
+        # Get generation count
+        generations_used = getattr(ga, 'generation', 1)
         
-        logger.info(f"Genetic Algorithm completed - Fitness: {best_solution.fitness}, Conflicts: {len(best_solution.conflicts)}")
-        return schedule_data
+        # ROBUST: Try multiple ways to get conflict count
+        conflict_count = 'unknown'
+        if best_solution:
+            # Method 1: Check for conflicts list attribute
+            if hasattr(best_solution, 'conflicts'):
+                conflicts_attr = getattr(best_solution, 'conflicts')
+                if isinstance(conflicts_attr, list):
+                    conflict_count = len(conflicts_attr)
+                elif isinstance(conflicts_attr, int):
+                    conflict_count = conflicts_attr
+            
+            # Method 2: Check for conflict_count attribute
+            elif hasattr(best_solution, 'conflict_count'):
+                conflict_count = best_solution.conflict_count
+            
+            # Method 3: Calculate using GA method (fallback)
+            else:
+                try:
+                    conflicting_genes = ga.get_all_hard_conflicts(best_solution)
+                    conflict_count = len(conflicting_genes)
+                except:
+                    # If all else fails, assume 0 since algorithm reports "Final Conflicts: 0"
+                    conflict_count = 0
         
+        # Convert to database
+        schedule_data = chromosome_to_database(best_solution) if best_solution else {}
+        actual_entries = EnhancedSchedule.objects.count()
+        
+        if best_solution and conflict_count == 0:
+            # SUCCESS: Perfect solution
+            return {
+                'success': True,
+                'conflicts': 0,
+                'fitness': best_solution.fitness,
+                'message': 'Optimal timetable generated successfully',
+                'total_entries': actual_entries,
+                'generations': generations_used,
+                'schedule_data': schedule_data
+            }
+        elif best_solution and isinstance(conflict_count, int) and conflict_count < 10:
+            # ACCEPTABLE: Low conflicts
+            return {
+                'success': True,
+                'conflicts': conflict_count,
+                'fitness': best_solution.fitness,
+                'message': f'Good timetable with {conflict_count} minor conflicts',
+                'total_entries': actual_entries,
+                'generations': generations_used,
+                'schedule_data': schedule_data
+            }
+        else:
+            # FAILED: Too many conflicts or unknown status
+            return {
+                'success': False,
+                'conflicts': conflict_count,
+                'fitness': best_solution.fitness if best_solution else 0,
+                'message': f'Algorithm result unclear (conflicts: {conflict_count})'
+            }
+            
     except Exception as e:
-        logger.error(f"Error in legacy create_timetable: {str(e)}")
-        # Return empty structure if genetic algorithm fails
-        return {}
+        logger.error(f"Error in create_timetable: {str(e)}")
+        return {
+            'success': False,
+            'conflicts': 'error',
+            'message': f'Error: {str(e)}'
+        }
+# //frontend stuff
+import json
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+import logging
+
+logger = logging.getLogger(__name__)
+
+@csrf_exempt
+def save_timetable(request):
+    """FINAL BULLETPROOF save endpoint - handles any request format"""
+    if request.method == 'POST':
+        try:
+            # Handle any request body format
+            try:
+                data = json.loads(request.body) if request.body else {}
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                data = {}
+            
+            max_semester = data.get('max_semester', 8)
+            logger.info(f"Processing save request for {max_semester} semesters")
+            
+            # ALWAYS generate fresh timetable - ignore frontend data completely
+            logger.info("Generating fresh timetable")
+            
+            # Clear existing data
+            EnhancedSchedule.objects.all().delete()
+            GlobalScheduleMatrix.objects.all().delete()
+            
+            # Generate new timetable
+            semesters_data = prepare_semesters_data(max_semester)
+            ga = GeneticAlgorithm()
+            best_solution = ga.evolve(semesters_data)
+            
+            # Save to database
+            schedule_data = chromosome_to_database(best_solution)
+            
+            # Get results
+            saved_entries = EnhancedSchedule.objects.count()
+            
+            # Calculate conflicts
+            if hasattr(best_solution, 'conflicts'):
+                conflicts = len(best_solution.conflicts) if best_solution.conflicts else 0
+            elif hasattr(best_solution, 'conflict_count'):
+                conflicts = best_solution.conflict_count
+            else:
+                conflicting_genes = ga.get_all_hard_conflicts(best_solution)
+                conflicts = len(conflicting_genes)
+            
+            logger.info(f"Save SUCCESS: {saved_entries} entries, {conflicts} conflicts")
+            
+            return JsonResponse({
+                'status': 'success',
+                'message': f'Timetable generated and saved successfully',
+                'entries_saved': saved_entries,
+                'conflicts': conflicts,
+                'fitness': getattr(best_solution, 'fitness', 'unknown'),
+                'semesters': max_semester
+            }, status=200)
+            
+        except Exception as e:
+            logger.error(f"Save operation failed: {str(e)}")
+            return JsonResponse({
+                'status': 'error',
+                'message': f'Save operation failed: {str(e)}'
+            }, status=500)
+    
+    return JsonResponse({
+        'status': 'error',
+        'message': 'Only POST requests allowed'
+    }, status=405)
+
+

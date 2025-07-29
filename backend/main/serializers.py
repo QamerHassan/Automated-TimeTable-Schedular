@@ -34,7 +34,13 @@ class SectionSerializer(serializers.ModelSerializer):
 class TimetableSerializer(serializers.ModelSerializer):
     class Meta:
         model = Timetable
-        fields = '__all__'
+        fields = ['id', 'semester', 'data', 'created_at']
+
+    # Optional: customize data if needed
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        # Ensure 'data' is serialized properly
+        return ret
 
 class TimetableGenerationSerializer(serializers.Serializer):
     max_semester = serializers.IntegerField(min_value=1, max_value=8)

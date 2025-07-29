@@ -1,265 +1,379 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
-import type React from "react"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { MessageCircle, X, Send, Bot, User } from "lucide-react"
+import React, { useState, useRef, useEffect, useCallback } from "react"
+import { MessageCircle, X, Send, Bot, User, AlertCircle, RefreshCw, Sparkles } from "lucide-react"
+import { Button } from "./ui/button"
+import { ScrollArea } from "./ui/scroll-area"
+import { useAuth } from "../contexts/auth-context"
+import { useTheme } from "../contexts/theme-context"
 
 interface Message {
   id: string
   text: string
-  isBot: boolean
+  isUser: boolean
   timestamp: Date
+  error?: boolean
 }
 
-const botResponses = {
-  greeting: [
-    "Hello! I'm your UMT Timetable Assistant. How can I help you today?",
-    "Hi there! I'm here to help you with any questions about our timetable scheduling system.",
-    "Welcome! I'm the UMT Timetable bot. What would you like to know?",
-  ],
-  creators: [
-    "This amazing software was created by a talented team of four developers: Awais (Team Lead), Mahad, Kamran, and Qamar. They're final year students at UMT who built this as their capstone project!",
-    "Our development team consists of four brilliant minds: Awais, Mahad, Kamran, and Qamar. They've put their heart and soul into creating this intelligent scheduling system.",
-  ],
-  features: [
-    "Our system offers AI-powered scheduling, conflict detection, multi-format export, real-time updates, and support for university, school, and personal timetables! It solves the complex problem of manual timetable creation, saving countless hours and ensuring optimal resource utilization.",
-    "Key features include: automatic timetable generation, Excel/CSV import, conflict-free scheduling, room optimization, and beautiful export options. This drastically reduces the time and effort traditionally required for academic scheduling.",
-  ],
-  help: [
-    "I can help you with: understanding features, learning about the creators, getting started guides, troubleshooting, and general questions about the system.",
-    "Feel free to ask me about: how to create timetables, file formats, team information, system features, or any technical questions!",
-  ],
-  default: [
-    "I'm not sure about that specific question, but I'm here to help! Try asking about our features, the development team, or how to use the system.",
-    "That's an interesting question! While I might not have that exact information, I can tell you about our timetable features, the amazing team behind this project, or help you get started.",
-  ],
+interface ChatbotProps {
+  className?: string
 }
 
-export function Chatbot() {
+export default function Chatbot({ className }: ChatbotProps) {
+  const { user } = useAuth()
+  const { theme } = useTheme()
   const [isOpen, setIsOpen] = useState(false)
   const [messages, setMessages] = useState<Message[]>([
     {
-      id: "1",
-      text: "Hello! I'm your UMT Timetable Assistant. I can help you learn about our features, meet our development team, or answer any questions about the system. What would you like to know?",
-      isBot: true,
+      id: "welcome",
+      text: `Hello${user ? ` ${user.first_name}` : ""}! I'm Quantime Assistant. How can I help you with your timetable scheduling today?`,
+      isUser: false,
       timestamp: new Date(),
     },
   ])
   const [inputValue, setInputValue] = useState("")
+  const [isLoading, setIsLoading] = useState(false)
+  const [retryMessage, setRetryMessage] = useState<string | null>(null)
   const scrollAreaRef = useRef<HTMLDivElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
-  // Auto-scroll to bottom when new messages are added
-  const scrollToBottom = () => {
+  const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }
+  }, [])
 
   useEffect(() => {
     scrollToBottom()
-  }, [messages])
+  }, [messages, scrollToBottom])
 
-  const getRandomResponse = (responses: string[]) => {
-    return responses[Math.floor(Math.random() * responses.length)]
-  }
+  useEffect(() => {
+    if (isOpen && inputRef.current) {
+      inputRef.current.focus()
+    }
+  }, [isOpen])
 
-  const getBotResponse = (userMessage: string): string => {
-    const message = userMessage.toLowerCase()
-    if (message.includes("hello") || message.includes("hi") || message.includes("hey")) {
-      return getRandomResponse(botResponses.greeting)
-    }
-    if (
-      message.includes("creator") ||
-      message.includes("developer") ||
-      message.includes("team") ||
-      message.includes("awais") ||
-      message.includes("mahad") ||
-      message.includes("kamran") ||
-      message.includes("qamar") ||
-      message.includes("who made") ||
-      message.includes("who created")
-    ) {
-      return getRandomResponse(botResponses.creators)
-    }
-    if (
-      message.includes("feature") ||
-      message.includes("what can") ||
-      message.includes("capability") ||
-      message.includes("function") ||
-      message.includes("solves") ||
-      message.includes("problem")
-    ) {
-      return getRandomResponse(botResponses.features)
-    }
-    if (message.includes("help") || message.includes("support") || message.includes("assist")) {
-      return getRandomResponse(botResponses.help)
-    }
-    return getRandomResponse(botResponses.default)
-  }
-
-  const handleSendMessage = () => {
-    if (!inputValue.trim()) return
+  const sendMessage = useCallback(async (messageText: string) => {
+    if (!messageText.trim() || isLoading) return
 
     const userMessage: Message = {
-      id: Date.now().toString(),
-      text: inputValue,
-      isBot: false,
+      id: `user-${Date.now()}`,
+      text: messageText.trim(),
+      isUser: true,
       timestamp: new Date(),
     }
 
     setMessages((prev) => [...prev, userMessage])
+    setInputValue("")
+    setIsLoading(true)
+    setRetryMessage(null)
 
-    // Simulate bot thinking time
-    setTimeout(() => {
+    try {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 30000)
+
+      console.log("Client - Sending message to API:", messageText.trim()) // Debug from history
+
+      const recentHistory = messages.slice(-4).map(m => ({
+        role: m.isUser ? 'user' : 'model',
+        parts: [{ text: m.text }]
+      }))
+
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          message: messageText.trim(),
+          context: {
+            user: user ? { name: user.first_name, id: user.id } : null,
+            timestamp: new Date().toISOString(),
+          },
+          history: recentHistory,
+        }),
+        signal: controller.signal,
+      })
+
+      clearTimeout(timeoutId)
+
+      console.log("Client - API response status:", response.status) // Debug from history
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        console.error("Client - API error details:", errorData) // Debug from history
+        if (response.status === 429) {
+          throw new Error("API quota exceeded. Please try again later or upgrade your plan.")
+        }
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`)
+      }
+
+      const data = await response.json()
+      console.log("Client - Full API response data:", data) // Debug from history
+
       const botMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        text: getBotResponse(inputValue),
-        isBot: true,
+        id: `bot-${Date.now()}`,
+        text: data.response || "I couldn't generate a proper response. Please try again.",
+        isUser: false,
         timestamp: new Date(),
       }
-      setMessages((prev) => [...prev, botMessage])
-    }, 1000)
 
-    setInputValue("")
+      setMessages((prev) => {
+        const newMessages = [...prev, botMessage]
+        console.log("Client - Updated messages state:", newMessages) // Debug from history
+        return newMessages
+      })
+    } catch (error) {
+      console.error("Client - Chat error details:", error) // Debug from history
+
+      let errorText = "I'm having trouble connecting right now. Please check your internet connection and try again."
+
+      if (error instanceof Error) {
+        if (error.name === "AbortError") {
+          errorText = "The request timed out. Please try again with a shorter message."
+        } else if (error.message.includes("429") || error.message.includes("quota")) {
+          errorText = "API quota exceeded. Please try again later."
+        } else {
+          errorText = error.message || errorText
+        }
+      }
+
+      const errorMessage: Message = {
+        id: `error-${Date.now()}`,
+        text: errorText,
+        isUser: false,
+        timestamp: new Date(),
+        error: true,
+      }
+
+      setMessages((prev) => {
+        const newMessages = [...prev, errorMessage]
+        console.log("Client - Updated messages with error:", newMessages) // Debug from history
+        return newMessages
+      })
+      setRetryMessage(messageText.trim())
+    } finally {
+      setIsLoading(false)
+    }
+  }, [isLoading, user, messages])
+
+  const handleSendMessage = () => {
+    sendMessage(inputValue)
+  }
+
+  const handleRetry = () => {
+    if (retryMessage) {
+      sendMessage(retryMessage)
+    }
   }
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault()
       handleSendMessage()
     }
   }
 
+  const clearChat = () => {
+    setMessages([
+      {
+        id: "welcome",
+        text: `Hello${user ? ` ${user.first_name}` : ""}! I'm Quantime Assistant. How can I help you with your timetable scheduling today?`,
+        isUser: false,
+        timestamp: new Date(),
+      },
+    ])
+    setRetryMessage(null)
+  }
+
+  const handleToggleChat = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const currentScrollY = window.scrollY
+    document.documentElement.classList.add("no-smooth-scroll")
+    setIsOpen(!isOpen)
+    setTimeout(() => {
+      window.scrollTo(0, currentScrollY)
+      document.documentElement.classList.remove("no-smooth-scroll")
+    }, 100)
+  }
+
   return (
-    <div className="fixed bottom-6 right-6 z-50">
-      {/* Chat Toggle Button - Fixed Position */}
-      {!isOpen && (
-        <Button
-          onClick={() => setIsOpen(true)}
-          className="h-16 w-16 rounded-full shadow-2xl transition-all duration-300 border-2 border-white/20 glass-button-float"
-          style={{
-            background: "linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%)",
-            boxShadow: "0 8px 32px rgba(110, 115, 255, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1)",
-          }}
+    <React.Fragment>
+      <div className={className}>
+        <div
+          className="fixed z-50"
+          style={{ bottom: "1.5rem", right: "1.5rem" }}
         >
-          <MessageCircle className="h-7 w-7 text-white drop-shadow-sm" />
-          <div className="absolute -top-1 -right-1 w-4 h-4 bg-green-400 rounded-full animate-pulse border-2 border-white"></div>
-        </Button>
-      )}
-
-      {/* Chat Window - Fixed Position */}
-      {isOpen && (
-        <div className="w-96 h-[500px] shadow-2xl border-0 glass-card-enhanced animate-slide-up-smooth bg-white rounded-lg overflow-hidden">
-          {/* Header - Fixed at top with high z-index */}
-          <div className="p-4 rounded-t-lg relative overflow-hidden glass-header z-50 bg-gradient-to-r from-blue-600 to-purple-600">
-            <div
-              className="absolute inset-0 z-0"
-              style={{
-                background: "linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%)",
-              }}
-            ></div>
-            <div className="absolute inset-0 bg-gradient-to-r from-white/10 to-transparent z-1"></div>
-            <div className="absolute inset-0 glass-shimmer-overlay z-2"></div>
-            <div className="relative flex items-center justify-between z-10">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-white/20 rounded-full backdrop-blur-sm border border-white/30 glass-icon-float">
-                  <Bot className="h-5 w-5 text-white" />
-                </div>
-                <div>
-                  <h3 className="text-lg text-white font-display font-semibold">Quantime Assistant</h3>
-                  <p className="text-sm text-white/80 font-ai">Always here to help</p>
-                </div>
+          <Button
+            onClick={handleToggleChat}
+            className="h-16 w-16 rounded-full bg-gradient-to-r from-primary to-accent hover:from-primary-hover hover:to-accent shadow-2xl hover:shadow-3xl transition-all duration-300 transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 chatbot-icon-enhanced"
+            aria-label={isOpen ? "Close chat" : "Open chat"}
+            type="button"
+          >
+            {isOpen ? (
+              <X className="h-6 w-6 text-gray-900" />
+            ) : (
+              <div className="relative">
+                <MessageCircle className="h-6 w-6 text-gray-900" />
+                <Sparkles className="h-3 w-3 text-yellow-300 absolute -top-1 -right-1 animate-pulse" />
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setIsOpen(false)}
-                className="text-white hover:bg-white/20 h-8 w-8 p-0 rounded-full glass-close-button z-60 relative"
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
+            )}
+          </Button>
+        </div>
 
-          {/* Content Area - Below header with lower z-index */}
-          <div className="flex flex-col h-[400px] relative bg-white z-10">
-            <ScrollArea className="flex-1 p-4 bg-white" ref={scrollAreaRef}>
-              <div className="space-y-4">
-                {messages.map((message) => (
-                  <div
-                    key={message.id}
-                    className={`flex gap-3 ${message.isBot ? "justify-start" : "justify-end"} animate-message-appear`}
-                  >
-                    {message.isBot && (
-                      <div
-                        className="p-2 rounded-full flex-shrink-0 border glass-avatar"
-                        style={{
-                          backgroundColor: "var(--primary)",
-                          borderColor: "rgba(255, 255, 255, 0.2)",
-                        }}
-                      >
-                        <Bot className="h-4 w-4 text-white" />
-                      </div>
-                    )}
-                    <div
-                      className={`max-w-[80%] p-3 rounded-2xl shadow-sm glass-message ${
-                        message.isBot ? "bg-gray-50 border border-gray-200" : "text-white shadow-lg"
-                      }`}
-                      style={
-                        !message.isBot
-                          ? {
-                              background: "linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%)",
-                            }
-                          : { color: "var(--foreground)" }
-                      }
-                    >
-                      <p className="text-sm font-ai">{message.text}</p>
-                      <p className={`text-xs mt-1 ${message.isBot ? "opacity-60" : "opacity-80"}`}>
-                        {message.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                      </p>
-                    </div>
-                    {!message.isBot && (
-                      <div
-                        className="p-2 rounded-full flex-shrink-0 border glass-avatar"
-                        style={{
-                          backgroundColor: "var(--accent)",
-                          borderColor: "rgba(255, 255, 255, 0.2)",
-                        }}
-                      >
-                        <User className="h-4 w-4 text-white" />
-                      </div>
-                    )}
+        {isOpen && (
+          <div
+            className="fixed z-40 rounded-2xl shadow-2xl border overflow-hidden transition-all duration-300 glass-card-enhanced bg-white/95 animate-chatbox-in"
+            style={{
+              bottom: "5.5rem",
+              right: "1.5rem",
+              width: "24rem",
+              height: "31.25rem",
+              maxWidth: "calc(100vw - 3rem)",
+              maxHeight: "calc(100vh - 8rem)",
+              transformOrigin: "bottom right",
+            }}
+          >
+            <div className="bg-gradient-to-r from-primary to-accent text-gray-900 p-4 glass-header-enhanced">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-3">
+                  <div className="p-2 bg-white/30 rounded-full backdrop-blur-sm">
+                    <Bot className="h-5 w-5 text-gray-900" />
                   </div>
-                ))}
-                <div ref={messagesEndRef} />
+                  <div>
+                    <h3 className="font-semibold text-lg font-display">Quantime Assistant</h3>
+                    <p className="text-sm text-gray-700 font-ai">
+                      {isLoading ? "Thinking..." : "AI-powered • Always here to help"}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Button
+                    onClick={clearChat}
+                    variant="ghost"
+                    size="sm"
+                    className="text-gray-900 hover:bg-white/30 h-8 w-8 p-0"
+                    title="Clear chat"
+                    type="button"
+                  >
+                    <RefreshCw className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    onClick={() => setIsOpen(false)}
+                    variant="ghost"
+                    size="sm"
+                    className="text-gray-900 hover:bg-white/30 h-8 w-8 p-0"
+                    title="Close chat"
+                    type="button"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
-            </ScrollArea>
+            </div>
 
-            {/* Input Area - At bottom with medium z-index */}
-            <div className="p-4 border-t border-gray-200 bg-white z-20">
-              <div className="flex gap-2">
-                <Input
+            <div className="flex-1 bg-white/95">
+              <ScrollArea className="h-[340px] p-4" ref={scrollAreaRef}>
+                <div className="space-y-4">
+                  {messages.map((message) => (
+                    <div key={message.id} className={`flex ${message.isUser ? "justify-end" : "justify-start"}`}>
+                      <div
+                        className={`max-w-[80%] rounded-lg px-4 py-2 ${
+                          message.isUser
+                            ? "bg-gradient-to-r from-primary to-accent text-gray-900 border border-primary/30 shadow-sm"
+                            : message.error
+                              ? "bg-red-50 text-red-800 border border-red-200"
+                              : "bg-white text-gray-800 border border-gray-200 shadow-sm"
+                        }`}
+                      >
+                        <div className="flex items-start space-x-2">
+                          {!message.isUser && (message.error ? (
+                            <AlertCircle className="h-4 w-4 mt-0.5 text-red-600 flex-shrink-0" />
+                          ) : (
+                            <Bot className="h-4 w-4 mt-0.5 text-primary flex-shrink-0" />
+                          ))}
+                          {message.isUser && <User className="h-4 w-4 mt-0.5 text-gray-900 flex-shrink-0" />}
+                          <div className="flex-1">
+                            <p className="text-sm whitespace-pre-wrap font-ai">{message.text}</p>
+                            <p className={`text-xs mt-1 ${
+                              message.isUser ? "text-gray-600" : message.error ? "text-red-600/70" : "text-gray-500"
+                            }`}>
+                              {message.timestamp.toLocaleTimeString([], {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {isLoading && (
+                    <div className="flex justify-start">
+                      <div className="rounded-lg px-4 py-2 max-w-[80%] bg-white border border-gray-200 shadow-sm">
+                        <div className="flex items-center space-x-2">
+                          <Bot className="h-4 w-4 text-primary" />
+                          <div className="flex space-x-1">
+                            {[0, 1, 2].map((i) => (
+                              <div
+                                key={i}
+                                className="w-2 h-2 bg-primary rounded-full animate-bounce"
+                                style={{ animationDelay: `${i * 0.1}s` }}
+                              />
+                            ))}
+                          </div>
+                          <span className="text-xs text-gray-600 font-ai">Quantime AI is thinking...</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  <div ref={messagesEndRef} />
+                </div>
+              </ScrollArea>
+            </div>
+
+            <div className="border-t border-gray-200 p-4 bg-white/95">
+              {retryMessage && (
+                <div className="mb-2">
+                  <Button
+                    onClick={handleRetry}
+                    variant="outline"
+                    size="sm"
+                    className="text-xs bg-transparent border-primary/30 text-primary hover:bg-primary/10"
+                    disabled={isLoading}
+                    type="button"
+                  >
+                    <RefreshCw className="h-3 w-3 mr-1" />
+                    Retry last message
+                  </Button>
+                </div>
+              )}
+              <div className="flex space-x-2">
+                <input
+                  ref={inputRef}
+                  type="text"
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyPress={handleKeyPress}
-                  placeholder="Ask me anything..."
-                  className="flex-1 border border-gray-300 bg-white shadow-sm font-ai"
+                  placeholder="Ask me about timetable scheduling..."
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-sm bg-white text-gray-800 placeholder-gray-500"
+                  disabled={isLoading}
+                  maxLength={500}
                 />
                 <Button
                   onClick={handleSendMessage}
-                  className="px-4 shadow-lg"
-                  style={{
-                    background: "linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%)",
-                  }}
+                  disabled={!inputValue.trim() || isLoading}
+                  className="bg-gradient-to-r from-primary to-accent hover:from-primary-hover hover:to-accent text-white px-4 py-2 rounded-lg transition-all duration-200 disabled:opacity-50"
+                  type="button"
                 >
-                  <Send className="h-4 w-4 text-white" />
+                  <Send className="h-4 w-4" />
                 </Button>
               </div>
+              <p className="text-xs mt-1 text-gray-500 font-ai">{inputValue.length}/500 characters</p>
             </div>
           </div>
-        </div>
-      )}
-    </div>
+        )}
+      </div>
+    </React.Fragment>
   )
 }
