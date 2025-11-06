@@ -1224,7 +1224,7 @@ export default function GeneratePage() {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            schedule: generatedTimetable,
+            timetable_data: generatedTimetable, // FIXED: was 'schedule', now 'timetable_data'
             max_semester: maxSemester,
           }),
         })
